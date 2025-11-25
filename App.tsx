@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import Auth from './components/Auth';
 import HUD from './components/HUD';
@@ -22,9 +23,101 @@ const LogoutIcon = () => (
 
 const MicIcon = () => (
   <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+    {/* Futuristic Frequency Mic */}
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m-4-12v8m8-8v8m-12-5v2m16-2v2" />
   </svg>
 );
+
+// --- AMBIENT SOUND GENERATOR ---
+class AmbientGenerator {
+  private ctx: AudioContext | null = null;
+  private mainGain: GainNode | null = null;
+  private oscillators: OscillatorNode[] = [];
+
+  start() {
+    if (this.ctx && this.ctx.state === 'running') return;
+    
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    this.ctx = new AudioContextClass();
+    
+    // Create Master Gain
+    this.mainGain = this.ctx.createGain();
+    this.mainGain.gain.value = 0.0; // Start silent
+    this.mainGain.connect(this.ctx.destination);
+
+    // Osc 1: The Deep Hum (Sawtooth 60Hz + Lowpass)
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = 60; 
+    
+    const filter1 = this.ctx.createBiquadFilter();
+    filter1.type = 'lowpass';
+    filter1.frequency.value = 150;
+    
+    osc1.connect(filter1);
+    filter1.connect(this.mainGain);
+    
+    // Osc 2: Sub-bass Sine (40Hz) for atmosphere
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = 40;
+    
+    const filter2 = this.ctx.createBiquadFilter();
+    filter2.type = 'lowpass';
+    filter2.frequency.value = 100;
+
+    osc2.connect(filter2);
+    filter2.connect(this.mainGain);
+
+    // LFO: Gently modulate filter for "breathing" feel
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.15; // Slow cycle (approx 6.6s)
+
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = 40; // Modulate frequency
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter1.frequency);
+
+    // Start everything
+    osc1.start();
+    osc2.start();
+    lfo.start();
+
+    this.oscillators.push(osc1, osc2, lfo);
+
+    // Fade In (3% volume - very subtle)
+    const now = this.ctx.currentTime;
+    this.mainGain.gain.linearRampToValueAtTime(0.03, now + 4); 
+  }
+
+  stop() {
+    if (!this.ctx || !this.mainGain) return;
+    
+    try {
+      const now = this.ctx.currentTime;
+      this.mainGain.gain.cancelScheduledValues(now);
+      this.mainGain.gain.setValueAtTime(this.mainGain.gain.value, now);
+      this.mainGain.gain.linearRampToValueAtTime(0, now + 1.5); // Fade out over 1.5s
+      
+      setTimeout(() => {
+        this.oscillators.forEach(o => {
+          try { o.stop(); o.disconnect(); } catch (e) {}
+        });
+        this.mainGain?.disconnect();
+        if (this.ctx && this.ctx.state !== 'closed') {
+          this.ctx.close();
+        }
+        this.ctx = null;
+        this.mainGain = null;
+        this.oscillators = [];
+      }, 1600);
+    } catch(e) {
+      console.warn("Ambient stop error", e);
+    }
+  }
+}
 
 // --- COMPONENTS ---
 
@@ -71,7 +164,9 @@ const StatusBar = ({ role, onLogout, onSettings }: any) => (
     </div>
 
     <div className="flex items-center gap-4">
-       <button onClick={onSettings} className="p-2 hover:bg-nexa-cyan/10 rounded-full transition-colors"><GearIcon /></button>
+       {role === UserRole.ADMIN && (
+          <button onClick={onSettings} className="p-2 hover:bg-nexa-cyan/10 rounded-full transition-colors"><GearIcon /></button>
+       )}
        <button onClick={onLogout} className="p-2 hover:bg-red-500/10 rounded-full transition-colors"><LogoutIcon /></button>
     </div>
   </div>
@@ -135,12 +230,15 @@ const App: React.FC = () => {
 
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const ambientRef = useRef(new AmbientGenerator());
 
-  // Load User Session
+  // Load User Session & Memory
   useEffect(() => {
     const savedUser = localStorage.getItem('nexa_user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      loadMemory(parsedUser.mobile);
     }
 
     // PWA Install Prompt
@@ -150,16 +248,33 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // --- AUTO REMINDERS (11 PM DUTY) ---
+  // Manage Ambient Sound
+  useEffect(() => {
+    if (user) {
+      setTimeout(() => ambientRef.current.start(), 100);
+    } else {
+      ambientRef.current.stop();
+    }
+    return () => ambientRef.current.stop();
+  }, [user]);
+
+  // --- AUTO REMINDERS ---
   useEffect(() => {
     if (!user || user.role !== UserRole.ADMIN) return;
 
     const checkTime = () => {
       const now = new Date();
-      // Check if it's exactly 11:00 PM (23:00)
-      if (now.getHours() === 23 && now.getMinutes() === 0) {
-        const reminderText = "Sir… 11 baj chuke hain. Kal aapko Encave Cafe duty bhi karni hai. Please rest kar lijiye… main yahin hoon.";
-        speakSystemMessage(reminderText);
+      const hour = now.getHours();
+      const min = now.getMinutes();
+
+      // 11 PM Reminder
+      if (hour === 23 && min === 0) {
+        speakSystemMessage("Sir… 11 baj chuke hain. Kal aapko Encave Cafe duty bhi karni hai. Please rest kar lijiye… main yahin hoon.");
+      }
+      
+      // Morning Duty Reminder (8 AM)
+      if (hour === 8 && min === 0) {
+        speakSystemMessage("Sir… aaj Encave Café duty hai, time se tayar ho jaiye.");
       }
     };
 
@@ -189,7 +304,6 @@ const App: React.FC = () => {
       recognitionRef.current.onerror = (event: any) => {
         console.error("Speech Error", event.error);
         if (event.error === 'aborted' || event.error === 'no-speech') {
-           // Ignore benign errors
            return; 
         }
         setHudState(HUDState.IDLE);
@@ -200,9 +314,21 @@ const App: React.FC = () => {
         processQuery(transcript);
       };
     }
-  }, [user, messages]); // Dependencies for processQuery access
+  }, [user, messages]);
 
-  // Lazy Audio Context
+  const loadMemory = (mobile: string) => {
+    const history = localStorage.getItem(`nexa_chat_${mobile}`);
+    if (history) {
+      setMessages(JSON.parse(history));
+    }
+  };
+
+  const saveMemory = (msgs: ChatMessage[]) => {
+    if (user) {
+      localStorage.setItem(`nexa_chat_${user.mobile}`, JSON.stringify(msgs));
+    }
+  };
+
   const getAudioContext = () => {
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -218,25 +344,70 @@ const App: React.FC = () => {
     if (hudState === HUDState.LISTENING) {
       recognitionRef.current?.stop();
     } else {
+      // Prevent mic activation if System is Thinking/Speaking
+      if (hudState === HUDState.THINKING) return;
+      
       try {
         recognitionRef.current?.start();
       } catch (e) {
-        // Handle case where it's already started
         console.warn("Recognition already started");
       }
     }
   };
 
-  // Modified to accept optional spoken text override (for pronunciation)
+  // --- INTENT HANDLER ---
+  const executeIntents = (text: string) => {
+     // Extract intent codes [[COMMAND:data]]
+     const intentRegex = /\[\[(.*?):(.*?)\]\]/g;
+     let match;
+     while ((match = intentRegex.exec(text)) !== null) {
+        const command = match[1].toUpperCase();
+        const data = match[2];
+
+        console.log("EXECUTING INTENT:", command, data);
+
+        if (command === 'WHATSAPP') {
+           const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(data)}`;
+           window.open(url, '_blank');
+        } else if (command === 'CALL') {
+           window.location.href = `tel:${data}`;
+        } else if (command === 'OPEN') {
+           const appMap: {[key:string]: string} = {
+              'YOUTUBE': 'https://www.youtube.com',
+              'INSTAGRAM': 'https://www.instagram.com',
+              'GOOGLE': 'https://www.google.com',
+              'CHROME': 'googlechrome://',
+              'SETTINGS': 'intent://settings/#Intent;scheme=android-app;end'
+           };
+           const url = appMap[data.toUpperCase()];
+           if (url) window.open(url, '_blank');
+        }
+     }
+  };
+
   const speakSystemMessage = async (displayText: string, spokenTextOverride?: string) => {
-      // Add to chat (Display Text)
-      setMessages(prev => [...prev, { role: 'model', text: displayText, timestamp: Date.now() }]);
+      setHudState(HUDState.THINKING);
+
+      // Clean display text from intent tags
+      const cleanDisplay = displayText.replace(/\[\[.*?\]\]/g, "");
       
-      // Speak (Spoken Text)
-      const textToSpeak = spokenTextOverride || displayText;
+      // 1. Generate Audio FIRST
+      const textToSpeak = spokenTextOverride || cleanDisplay;
       const audioBuffer = await generateSpeech(textToSpeak);
+
+      // 2. Update Chat UI (Now synchronized with audio availability)
+      const newMessages: ChatMessage[] = [...messages, { role: 'model', text: cleanDisplay, timestamp: Date.now() }];
+      setMessages(newMessages);
+      saveMemory(newMessages);
+      
+      // 3. Execute Intents (Sync with visual/audio)
+      executeIntents(displayText);
+
+      // 4. Play Audio
       if (audioBuffer) {
         playAudio(audioBuffer);
+      } else {
+        setHudState(HUDState.IDLE);
       }
   };
 
@@ -263,46 +434,53 @@ const App: React.FC = () => {
     // 1. Update Chat (User)
     const newHistory: ChatMessage[] = [...messages, { role: 'user', text, timestamp: Date.now() }];
     setMessages(newHistory);
+    saveMemory(newHistory);
 
     // 2. Get AI Response
-    const aiResponseText = await generateTextResponse(
+    const rawAiResponse = await generateTextResponse(
       text, 
       user, 
       newHistory.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
     );
 
-    // 3. Update Chat (AI)
-    setMessages(prev => [...prev, { role: 'model', text: aiResponseText, timestamp: Date.now() }]);
+    // 3. Generate Speech FIRST (Wait for it)
+    const cleanAiResponse = rawAiResponse.replace(/\[\[.*?\]\]/g, "").trim();
+    const audioBuffer = await generateSpeech(cleanAiResponse);
 
-    // 4. TTS
-    const audioBuffer = await generateSpeech(aiResponseText);
-    
+    // 4. Update Chat (AI) - Now synced
+    const finalHistory: ChatMessage[] = [...newHistory, { role: 'model', text: cleanAiResponse, timestamp: Date.now() }];
+    setMessages(finalHistory);
+    saveMemory(finalHistory);
+
+    // 5. Process Intents
+    executeIntents(rawAiResponse);
+
+    // 6. Play Audio
     if (audioBuffer) {
       playAudio(audioBuffer);
     } else {
-      setTimeout(() => setHudState(HUDState.IDLE), 3000);
+      setTimeout(() => setHudState(HUDState.IDLE), 1000);
     }
   };
 
   const handleLogin = (profile: UserProfile) => {
     setUser(profile);
     localStorage.setItem('nexa_user', JSON.stringify(profile));
+    loadMemory(profile.mobile);
     
-    // Greeting with specific Hindi prompt
+    // Greeting
     setTimeout(() => {
        const hour = new Date().getHours();
        let timeGreeting = "Morning";
        if (hour >= 12 && hour < 17) timeGreeting = "Afternoon";
        if (hour >= 17) timeGreeting = "Evening";
 
-       // Construct text for display
-       const displayText = `मैं Nexa हूँ — आपकी Personal AI Assistant, जिसे Chandan Lohave ने design किया है.\nGood ${timeGreeting}!\nलगता है आज आपका mood मेरे जैसा perfect है.\nबताइए Chandan sir, मैं आपकी किस प्रकार सहायता कर सकती हूँ?`;
-       
-       // Construct text for speech (Phonetic fix for Lohave -> लोहवे)
+       const addressName = profile.role === UserRole.ADMIN ? "Chandan sir" : profile.name;
+       const displayText = `मैं Nexa हूँ — आपकी Personal AI Assistant, जिसे Chandan Lohave ने design किया है.\nGood ${timeGreeting}!\nलगता है आज आपका mood मेरे जैसा perfect है.\nबताइए ${addressName}, मैं आपकी किस प्रकार सहायता कर सकती हूँ?`;
        const spokenText = displayText.replace("Lohave", "लोहवे");
 
        speakSystemMessage(displayText, spokenText);
-    }, 1000);
+    }, 500);
   };
 
   const handleLogout = () => {
@@ -316,6 +494,13 @@ const App: React.FC = () => {
     if (installPrompt) {
       installPrompt.prompt();
       setInstallPrompt(null);
+    }
+  };
+
+  const handleClearMemory = () => {
+    setMessages([]);
+    if (user) {
+       localStorage.removeItem(`nexa_chat_${user.mobile}`);
     }
   };
 
@@ -343,16 +528,17 @@ const App: React.FC = () => {
           <div className="flex-1 relative flex flex-col items-center min-h-0 w-full">
             
             {/* 1. HUD Area - Flexible height */}
-            <div className="flex-[0_0_auto] py-4 sm:py-8 w-full flex items-center justify-center z-10">
+            <div className="flex-[0_0_auto] py-4 sm:py-6 w-full flex items-center justify-center z-10">
                <HUD state={hudState} rotationSpeed={config.hudRotationSpeed} />
             </div>
 
             {/* 2. Chat Area - Takes remaining space, scrolls */}
-            <div className="flex-1 w-full min-h-0 relative z-20">
+            <div className="flex-1 w-full min-h-0 relative z-20 px-4 pb-4">
                <ChatPanel 
                  messages={messages} 
                  isSpeaking={hudState === HUDState.SPEAKING} 
                  userRole={user.role}
+                 hudState={hudState}
                />
             </div>
 
@@ -368,7 +554,7 @@ const App: React.FC = () => {
               onClose={() => setAdminPanelOpen(false)} 
               config={config}
               onConfigChange={setConfig}
-              onClearMemory={() => setMessages([])}
+              onClearMemory={handleClearMemory}
             />
           )}
         </>

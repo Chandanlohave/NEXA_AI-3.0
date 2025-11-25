@@ -6,7 +6,7 @@ interface AuthProps {
   onLogin: (user: UserProfile) => void;
 }
 
-// --- HELPER COMPONENTS (Moved outside to prevent re-renders/focus loss) ---
+// --- HELPER COMPONENTS ---
 
 const BracketInput = ({ name, placeholder, type = 'text', value, onChange, autoFocus, variant = 'cyan' }: any) => {
   const colorClass = variant === 'red' ? 'text-red-500' : 'text-nexa-cyan';
@@ -23,7 +23,7 @@ const BracketInput = ({ name, placeholder, type = 'text', value, onChange, autoF
           value={value}
           onChange={onChange}
           autoFocus={autoFocus}
-          className={`w-full bg-transparent border-none text-white text-center font-mono text-lg focus:ring-0 focus:outline-none ${placeholderClass} z-50 tracking-widest`}
+          className={`w-full bg-transparent border-none text-white text-center font-mono text-base focus:ring-0 focus:outline-none ${placeholderClass} z-50 tracking-widest relative z-10`}
           placeholder={placeholder}
           autoComplete="off"
         />
@@ -39,7 +39,7 @@ const CyberButton = ({ onClick, label, secondary = false, loading = false }: any
     onClick={onClick}
     disabled={loading}
     className={`
-      w-full py-4 px-6 font-bold tracking-[0.2em] uppercase transition-all duration-200 z-50 cursor-pointer clip-corner
+      w-full py-4 px-6 font-bold tracking-[0.2em] uppercase transition-all duration-200 z-50 cursor-pointer clip-corner relative z-20
       ${secondary 
         ? 'bg-transparent border border-nexa-cyan/30 text-nexa-cyan/60 hover:text-white hover:border-nexa-cyan' 
         : 'bg-nexa-cyan text-black hover:bg-white hover:shadow-[0_0_20px_rgba(41,223,255,0.6)]'
@@ -121,10 +121,18 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   };
 
   const requestOtp = () => {
-    if (formData.fullName.length < 3 || formData.mobile.length !== 10) {
-      setError('// ERROR: DATA FORMAT INVALID');
+    // Validation Rule: Full name must be alphabets/spaces only, min 3 chars
+    const nameRegex = /^[a-zA-Z\s]{3,}$/;
+
+    if (!nameRegex.test(formData.fullName)) {
+      setError('// ERROR: INVALID NAME (MIN 3 CHARS, ALPHA ONLY)');
       return;
     }
+    if (formData.mobile.length !== 10 || isNaN(Number(formData.mobile))) {
+      setError('// ERROR: INVALID MOBILE (10 DIGITS)');
+      return;
+    }
+
     setLoading(true);
     setTimeout(() => {
       const code = Math.floor(1000 + Math.random() * 9000).toString();
@@ -157,7 +165,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center p-6 z-50 overflow-hidden">
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center p-6 z-[60] overflow-hidden">
       
       {/* --- BACKGROUND LAYERS --- */}
       <div className="absolute inset-0 z-0 opacity-20">
@@ -262,7 +270,6 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                </div>
                
                <div className="space-y-4 relative z-20">
-                 {/* Only username gets autoFocus to start. Subsequent renders won't reset focus because component type is stable. */}
                  <BracketInput name="username" placeholder="IDENTITY_ID" value={formData.username} onChange={handleChange} autoFocus variant="red" />
                  <BracketInput name="password" placeholder="ACCESS_KEY" type="password" value={formData.password} onChange={handleChange} variant="red" />
                </div>

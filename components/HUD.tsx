@@ -34,27 +34,26 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
     <div className={`relative flex items-center justify-center transition-all duration-500 ${state === HUDState.SPEAKING ? 'scale-105' : 'scale-100'}`}>
       
       {/* --- LEFT SIDE HOLOGRAM (Mini Rings) --- */}
-      <div className={`hidden xs:flex flex-col items-end mr-2 sm:mr-4 opacity-80 transition-opacity duration-500`}>
+      <div className={`hidden xs:flex flex-col items-end mr-3 opacity-80 transition-opacity duration-500`}>
         <div className="flex items-center">
            {/* Mini Rotating Rings */}
-           <div className={`relative w-12 h-12 rounded-full border ${borderColor} flex items-center justify-center animate-spin-reverse-slow`}>
-              <div className={`w-8 h-8 rounded-full border border-dashed ${borderColor} opacity-60 animate-spin`}></div>
+           <div className={`relative w-10 h-10 rounded-full border ${borderColor} flex items-center justify-center animate-spin-reverse-slow`}>
+              <div className={`w-6 h-6 rounded-full border border-dashed ${borderColor} opacity-60 animate-spin`}></div>
               <div className={`absolute top-0 w-1 h-1 ${bgGlow} rounded-full shadow-[0_0_5px_currentColor]`}></div>
            </div>
            {/* Connecting Line to Main HUD */}
-           <div className={`w-4 sm:w-8 h-[1px] ${bgGlow} opacity-50 ml-2`}></div>
+           <div className={`w-4 h-[1px] ${bgGlow} opacity-50 ml-2`}></div>
         </div>
         {/* Decorative bits */}
-        <div className="flex mt-1 gap-1 mr-8">
+        <div className="flex mt-1 gap-1 mr-6">
             <div className={`w-1 h-1 ${bgGlow} rounded-full animate-pulse`}></div>
-            <div className={`w-1 h-1 ${bgGlow} rounded-full animate-pulse delay-75`}></div>
-            <div className={`w-6 h-[1px] ${bgGlow} opacity-30`}></div>
+            <div className={`w-4 h-[1px] ${bgGlow} opacity-30`}></div>
         </div>
       </div>
 
 
-      {/* --- CENTER MAIN HUD --- */}
-      <div className="relative w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center">
+      {/* --- CENTER MAIN HUD (RESIZED SMALLER) --- */}
+      <div className="relative w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center">
         
         {/* 1. Outer Glow Container */}
         <div className={`absolute inset-0 rounded-full ${intenseGlow} opacity-20 blur-xl transition-all duration-500`}></div>
@@ -71,7 +70,7 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
           style={{ animationDuration: `${20 / rotationSpeed}s` }}
         >
           {/* Orbiting Dot */}
-          <div className={`absolute top-1/2 -right-1 w-2 h-2 ${bgGlow} rounded-full shadow-[0_0_10px_currentColor]`}></div>
+          <div className={`absolute top-1/2 -right-1 w-1.5 h-1.5 ${bgGlow} rounded-full shadow-[0_0_10px_currentColor]`}></div>
         </div>
 
         {/* 4. Inner Tech Ring (Counter Rotate) */}
@@ -90,18 +89,18 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
         <div className={`absolute w-[45%] h-[45%] rounded-full border ${borderColor} opacity-30 ${state === HUDState.SPEAKING ? 'animate-pulse-fast bg-white/5' : ''}`}></div>
 
         {/* 7. Center Text */}
-        <div className={`relative z-10 text-4xl sm:text-5xl font-light tracking-[0.15em] ${primaryColor} font-mono transition-colors duration-500 drop-shadow-[0_0_5px_rgba(0,0,0,0.8)]`}>
+        <div className={`relative z-10 text-3xl sm:text-4xl font-light tracking-[0.15em] ${primaryColor} font-mono transition-colors duration-500 drop-shadow-[0_0_5px_rgba(0,0,0,0.8)]`}>
           NEXA
         </div>
 
-        {/* 7b. STATUS TEXT (NEW) */}
-        <div className={`absolute mt-24 text-[10px] sm:text-xs tracking-[0.3em] font-mono ${primaryColor} animate-pulse uppercase opacity-80`}>
+        {/* 7b. STATUS TEXT */}
+        <div className={`absolute mt-20 text-[9px] sm:text-[10px] tracking-[0.3em] font-mono ${primaryColor} animate-pulse uppercase opacity-80`}>
            {state}
         </div>
         
         {/* 8. Micro-ornaments (Top/Bottom) */}
-        <div className={`absolute top-2 w-[1px] h-4 ${bgGlow} opacity-50`}></div>
-        <div className={`absolute bottom-2 w-[1px] h-4 ${bgGlow} opacity-50`}></div>
+        <div className={`absolute top-1 w-[1px] h-3 ${bgGlow} opacity-50`}></div>
+        <div className={`absolute bottom-1 w-[1px] h-3 ${bgGlow} opacity-50`}></div>
 
         {/* Waveform Visualization (Speaking) */}
         {state === HUDState.SPEAKING && (
@@ -114,15 +113,15 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
 
 
       {/* --- RIGHT SIDE HOLOGRAM (Triangle + Nodes) --- */}
-      <div className={`hidden xs:flex flex-col items-start ml-2 sm:ml-4 opacity-80 transition-opacity duration-500`}>
+      <div className={`hidden xs:flex flex-col items-start ml-3 opacity-80 transition-opacity duration-500`}>
         <div className="flex items-center">
            {/* Connecting Line from Main HUD */}
-           <div className={`w-4 sm:w-8 h-[1px] ${bgGlow} opacity-50 mr-2`}></div>
+           <div className={`w-4 h-[1px] ${bgGlow} opacity-50 mr-2`}></div>
            
            {/* Rotating Triangle Container */}
-           <div className="relative w-14 h-14 flex items-center justify-center">
+           <div className="relative w-10 h-10 flex items-center justify-center">
               {/* Triangle (SVG) */}
-              <svg className={`w-12 h-12 ${primaryColor} animate-spin-slow opacity-80`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+              <svg className={`w-8 h-8 ${primaryColor} animate-spin-slow opacity-80`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
                  <path d="M12 2L2 22h20L12 2z" />
               </svg>
               {/* Center Dot */}
@@ -130,7 +129,7 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
            </div>
         </div>
         {/* Blinking Nodes Data Stream */}
-        <div className="flex flex-col ml-10 -mt-2 space-y-1">
+        <div className="flex flex-col ml-8 -mt-1 space-y-1">
              <div className="flex space-x-1">
                <div className={`w-1 h-1 ${bgGlow} opacity-80`}></div>
                <div className={`w-3 h-[1px] ${bgGlow} opacity-50`}></div>
