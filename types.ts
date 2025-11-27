@@ -1,3 +1,4 @@
+
 export enum UserRole {
   ADMIN = 'ADMIN',
   USER = 'USER'
@@ -7,13 +8,6 @@ export interface UserProfile {
   name: string;
   mobile: string;
   role: UserRole;
-  theme: string;
-  chatHistory: ChatMessage[];
-  preferences: {
-    voice: string;
-    speed: number;
-    pitch: number;
-  };
 }
 
 export interface ChatMessage {
@@ -33,4 +27,10 @@ export interface AppConfig {
   introText: string;
   animationsEnabled: boolean;
   hudRotationSpeed: number;
+}
+
+export interface StoredUser {
+  name: string;
+  mobile: string;
+  blocked: boolean;
 }

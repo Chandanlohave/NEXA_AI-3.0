@@ -6,6 +6,7 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   isSpeaking: boolean;
   userRole?: UserRole;
+  userName?: string;
   hudState?: HUDState;
 }
 
@@ -39,7 +40,7 @@ const TypewriterText: React.FC<TypewriterProps> = ({ text, onTyping }) => {
   return <span>{displayedText}</span>;
 };
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ messages, isSpeaking, userRole = UserRole.USER, hudState }) => {
+const ChatPanel: React.FC<ChatPanelProps> = ({ messages, isSpeaking, userRole = UserRole.USER, userName, hudState }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -81,7 +82,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ messages, isSpeaking, userRole = 
           // Determine Labels
           let label = 'NEXA';
           if (isUser) {
-            label = userRole === UserRole.ADMIN ? 'ADMIN' : 'USER';
+            label = userRole === UserRole.ADMIN ? 'ADMIN' : (userName || 'USER').toUpperCase();
           }
 
           // Animation Condition: 

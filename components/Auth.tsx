@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole, StoredUser } from '../types';
 
 interface AuthProps {
   onLogin: (user: UserProfile) => void;
@@ -73,11 +73,11 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [generatedOtp, setGeneratedOtp] = useState('');
-  const [glitchText, setGlitchText] = useState('SYSTEM_LOCKED');
+  const [glitchText, setGlitchText] = useState('AWAITING_KEY');
 
   // Random glitch effect for header
   useEffect(() => {
-    const texts = ['SYSTEM_LOCKED', 'ENCRYPTION_ACTIVE', 'AWAITING_KEY', 'NEXA_PROTOCOL'];
+    const texts = ['ENCRYPTION_ACTIVE', 'AWAITING_KEY', 'NEXA_PROTOCOL'];
     let interval: any;
     if (mode === 'INIT') {
       interval = setInterval(() => {
@@ -111,9 +111,6 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         name: 'Chandan',
         mobile: '0000000000',
         role: UserRole.ADMIN,
-        theme: 'DARK_NEON',
-        chatHistory: [],
-        preferences: { voice: 'default', speed: 1, pitch: 1 }
       });
     } else {
       setError('// ERROR: INVALID CREDENTIALS');
@@ -133,6 +130,17 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       return;
     }
 
+    // Check if user is blocked
+    const allUsersRaw = localStorage.getItem('nexa_all_users');
+    if (allUsersRaw) {
+      const allUsers: StoredUser[] = JSON.parse(allUsersRaw);
+      const existingUser = allUsers.find(u => u.mobile === formData.mobile);
+      if (existingUser && existingUser.blocked) {
+        setError('// ERROR: ACCESS DENIED. ACCOUNT BLOCKED.');
+        return;
+      }
+    }
+
     setLoading(true);
     setTimeout(() => {
       const code = Math.floor(1000 + Math.random() * 9000).toString();
@@ -148,9 +156,6 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         name: formData.fullName,
         mobile: formData.mobile,
         role: UserRole.USER,
-        theme: 'DARK_NEON',
-        chatHistory: [],
-        preferences: { voice: 'default', speed: 1, pitch: 1 }
       });
     } else {
       setError('// ERROR: MISMATCH DETECTED');
@@ -167,6 +172,17 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   return (
     <div className="fixed inset-0 bg-black flex flex-col items-center justify-center p-6 z-[60] overflow-hidden">
       
+      {/* --- HEADER --- */}
+      <div className="absolute top-16 sm:top-20 text-center w-full z-10 font-sans">
+        <div className="text-nexa-cyan text-[10px] sm:text-xs tracking-[0.3em] uppercase opacity-90">
+          CREATED BY
+        </div>
+        <div className="text-white text-2xl sm:text-3xl tracking-[0.2em] uppercase mt-1 font-medium">
+          CHANDAN LOHAVE
+        </div>
+      </div>
+
+
       {/* --- BACKGROUND LAYERS --- */}
       <div className="absolute inset-0 z-0 opacity-20">
          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] border border-nexa-cyan/20 rounded-full animate-spin-slow"></div>
@@ -221,8 +237,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                
                <div className="mt-8 text-center space-y-2">
                  <h1 className="text-4xl font-bold text-white tracking-widest">NEXA</h1>
-                 <div className="text-nexa-cyan/60 text-xs font-mono tracking-[0.3em] group-hover:text-nexa-cyan transition-colors">
-                   {loading ? 'INITIALIZING...' : 'TAP TO CONNECT'}
+                 <div className="text-nexa-cyan/80 text-xs font-mono tracking-[0.3em] uppercase pt-1">
+                   CALIBRATING_NEURAL_NET...
                  </div>
                </div>
             </div>
@@ -242,9 +258,12 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
                <div className="pt-4 space-y-4">
                  <CyberButton onClick={requestOtp} label="INITIATE" loading={loading} />
-                 <div className="text-center">
+                 <div className="flex justify-between items-center text-center mt-2 px-1">
+                   <button onClick={() => setMode('INIT')} className="text-[9px] text-zinc-600 hover:text-nexa-cyan font-mono tracking-widest uppercase transition-colors">
+                     &lt;&lt; BACK
+                   </button>
                    <button onClick={() => setMode('ADMIN')} className="text-[9px] text-zinc-600 hover:text-nexa-cyan font-mono tracking-widest uppercase transition-colors">
-                     // Admin Console
+                     // ADMIN CONSOLE
                    </button>
                  </div>
                </div>
@@ -322,6 +341,11 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                 />
                 
                 <CyberButton onClick={verifyOtp} label="AUTHENTICATE" loading={loading} />
+                <div className="text-center">
+                    <button onClick={() => setMode('USER')} className="text-[9px] text-zinc-600 hover:text-nexa-cyan font-mono tracking-widest uppercase transition-colors">
+                        &lt;&lt; RE-ENTER DETAILS
+                    </button>
+                </div>
               </div>
             </div>
           )}
@@ -335,6 +359,12 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         </div>
 
       </div>
+
+      {/* --- FOOTER --- */}
+      <div className="absolute bottom-12 sm:bottom-16 text-center w-full text-nexa-cyan/70 font-mono text-xs tracking-wider z-10">
+        © 2025 CHANDAN LOHAVE. ALL RIGHTS RESERVED.
+      </div>
+
 
       {/* Styles for clip-path support */}
       <style>{`

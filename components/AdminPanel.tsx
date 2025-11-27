@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AppConfig } from '../types';
 
@@ -6,10 +7,11 @@ interface AdminPanelProps {
   onClose: () => void;
   config: AppConfig;
   onConfigChange: (newConfig: AppConfig) => void;
-  onClearMemory: () => void;
+  onPurgeMemory: () => void;
+  onManageAccounts: () => void;
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, config, onConfigChange, onClearMemory }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, config, onConfigChange, onPurgeMemory, onManageAccounts }) => {
   if (!isOpen) return null;
 
   const handleExportLogs = () => {
@@ -29,7 +31,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, config, onConf
   };
 
   return (
-    <div className="absolute top-16 right-4 w-72 bg-black/90 border border-nexa-cyan rounded-lg backdrop-blur-md p-4 z-50 shadow-[0_0_20px_rgba(41,223,255,0.3)]">
+    <div className="absolute top-16 right-4 w-72 bg-black/90 border border-nexa-cyan rounded-lg backdrop-blur-md p-4 z-50 shadow-[0_0_20px_rgba(41,223,255,0.3)] animate-fade-in">
       <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
         <h2 className="text-nexa-cyan font-mono text-sm tracking-wider">ADMIN CONTROL</h2>
         <button onClick={onClose} className="text-zinc-500 hover:text-white">&times;</button>
@@ -53,13 +55,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, config, onConf
           <label className="block text-zinc-400 text-xs font-mono mb-1">Animations</label>
           <button 
             onClick={() => onConfigChange({...config, animationsEnabled: !config.animationsEnabled})}
-            className={`w-full py-2 text-xs font-mono border ${config.animationsEnabled ? 'border-nexa-cyan text-nexa-cyan' : 'border-zinc-700 text-zinc-500'}`}
+            className={`w-full py-2 text-xs font-mono border transition-colors ${config.animationsEnabled ? 'border-nexa-cyan text-nexa-cyan bg-nexa-cyan/10' : 'border-zinc-700 text-zinc-500'}`}
           >
             {config.animationsEnabled ? 'ENABLED' : 'DISABLED'}
           </button>
         </div>
 
         <div className="pt-2 border-t border-zinc-800 space-y-2">
+           <button 
+             onClick={onManageAccounts}
+             className="w-full py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-white text-xs font-mono transition-colors"
+           >
+             MANAGE ACCOUNTS
+           </button>
            <button 
              onClick={handleExportLogs}
              className="w-full py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-white text-xs font-mono transition-colors"
@@ -68,14 +76,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, config, onConf
            </button>
            
            <button 
-             className="w-full py-2 border border-zinc-700 text-zinc-500 cursor-not-allowed text-xs font-mono"
-             disabled
-           >
-             MANAGE ACCOUNTS (LOCKED)
-           </button>
-
-           <button 
-             onClick={onClearMemory}
+             onClick={onPurgeMemory}
              className="w-full py-2 bg-red-900/30 border border-red-500 text-red-500 hover:bg-red-900/50 text-xs font-mono transition-colors"
            >
              PURGE MEMORY BANKS

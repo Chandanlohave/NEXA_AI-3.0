@@ -4,8 +4,10 @@ import Auth from './components/Auth';
 import HUD from './components/HUD';
 import ChatPanel from './components/ChatPanel';
 import AdminPanel from './components/AdminPanel';
+import ManageAccountsModal from './components/ManageAccountsModal';
 import { UserProfile, UserRole, HUDState, ChatMessage, AppConfig } from './types';
 import { generateTextResponse, generateSpeech } from './services/geminiService';
+import { getAdminHistory, saveAdminHistory, getUserHistory, saveUserHistory } from './services/memoryService';
 
 // --- ICONS ---
 
@@ -27,97 +29,6 @@ const MicIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m-4-12v8m8-8v8m-12-5v2m16-2v2" />
   </svg>
 );
-
-// --- AMBIENT SOUND GENERATOR ---
-class AmbientGenerator {
-  private ctx: AudioContext | null = null;
-  private mainGain: GainNode | null = null;
-  private oscillators: OscillatorNode[] = [];
-
-  start() {
-    if (this.ctx && this.ctx.state === 'running') return;
-    
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    this.ctx = new AudioContextClass();
-    
-    // Create Master Gain
-    this.mainGain = this.ctx.createGain();
-    this.mainGain.gain.value = 0.0; // Start silent
-    this.mainGain.connect(this.ctx.destination);
-
-    // Osc 1: The Deep Hum (Sawtooth 60Hz + Lowpass)
-    const osc1 = this.ctx.createOscillator();
-    osc1.type = 'sawtooth';
-    osc1.frequency.value = 60; 
-    
-    const filter1 = this.ctx.createBiquadFilter();
-    filter1.type = 'lowpass';
-    filter1.frequency.value = 150;
-    
-    osc1.connect(filter1);
-    filter1.connect(this.mainGain);
-    
-    // Osc 2: Sub-bass Sine (40Hz) for atmosphere
-    const osc2 = this.ctx.createOscillator();
-    osc2.type = 'sine';
-    osc2.frequency.value = 40;
-    
-    const filter2 = this.ctx.createBiquadFilter();
-    filter2.type = 'lowpass';
-    filter2.frequency.value = 100;
-
-    osc2.connect(filter2);
-    filter2.connect(this.mainGain);
-
-    // LFO: Gently modulate filter for "breathing" feel
-    const lfo = this.ctx.createOscillator();
-    lfo.type = 'sine';
-    lfo.frequency.value = 0.15; // Slow cycle (approx 6.6s)
-
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 40; // Modulate frequency
-
-    lfo.connect(lfoGain);
-    lfoGain.connect(filter1.frequency);
-
-    // Start everything
-    osc1.start();
-    osc2.start();
-    lfo.start();
-
-    this.oscillators.push(osc1, osc2, lfo);
-
-    // Fade In (3% volume - very subtle)
-    const now = this.ctx.currentTime;
-    this.mainGain.gain.linearRampToValueAtTime(0.03, now + 4); 
-  }
-
-  stop() {
-    if (!this.ctx || !this.mainGain) return;
-    
-    try {
-      const now = this.ctx.currentTime;
-      this.mainGain.gain.cancelScheduledValues(now);
-      this.mainGain.gain.setValueAtTime(this.mainGain.gain.value, now);
-      this.mainGain.gain.linearRampToValueAtTime(0, now + 1.5); // Fade out over 1.5s
-      
-      setTimeout(() => {
-        this.oscillators.forEach(o => {
-          try { o.stop(); o.disconnect(); } catch (e) {}
-        });
-        this.mainGain?.disconnect();
-        if (this.ctx && this.ctx.state !== 'closed') {
-          this.ctx.close();
-        }
-        this.ctx = null;
-        this.mainGain = null;
-        this.oscillators = [];
-      }, 1600);
-    } catch(e) {
-      console.warn("Ambient stop error", e);
-    }
-  }
-}
 
 // --- COMPONENTS ---
 
@@ -144,6 +55,42 @@ const InstallBanner: React.FC<{ prompt: any, onInstall: () => void }> = ({ promp
       </button>
     </div>
   );
+};
+
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, promptText, confirmKeyword }: any) => {
+    const [input, setInput] = useState('');
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] animate-fade-in">
+            <div className="w-full max-w-sm bg-black border-2 border-red-500/50 rounded-lg p-6 shadow-[0_0_30px_rgba(220,38,38,0.5)]">
+                <h2 className="text-red-500 text-lg font-mono tracking-wider mb-4 border-b border-red-500/20 pb-2">{title}</h2>
+                <p className="text-zinc-300 text-sm mb-6">{promptText}</p>
+                <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    className="w-full bg-red-900/20 border border-red-500/50 text-white text-center font-mono tracking-[0.3em] uppercase p-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder={`TYPE '${confirmKeyword}'`}
+                />
+                <div className="flex gap-4 mt-6">
+                    <button
+                        onClick={onClose}
+                        className="w-full py-2 border border-zinc-700 text-zinc-400 hover:text-white hover:border-white text-xs font-mono transition-colors"
+                    >
+                        ABORT
+                    </button>
+                    <button
+                        onClick={() => { if (input === confirmKeyword) onConfirm(); }}
+                        disabled={input !== confirmKeyword}
+                        className="w-full py-2 bg-red-600 text-white border border-red-500 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:border-zinc-700 text-xs font-mono transition-colors"
+                    >
+                        CONFIRM
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const StatusBar = ({ role, onLogout, onSettings }: any) => (
@@ -214,6 +161,17 @@ const pcmToAudioBuffer = (pcmData: ArrayBuffer, context: AudioContext): AudioBuf
   return buffer;
 };
 
+// --- GREETING PROMPTS ---
+const USER_INTROS = [
+    "मैं Nexa हूँ। Sir, raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Ab bataiye, aaj main aapki kaise madad kar sakti hoon?",
+    "मैं Nexa हूँ, aapki Personal AI Assistant, jise Chandan Lohave ne design kiya hai. Raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Aapse judna hamesha achha lagta hai. Bataiye, main aapki kis prakaar sahayata kar sakti hoon?",
+];
+
+const ADMIN_INTROS = [
+    "मैं Nexa हूँ, aapki Personal AI Assistant. Admin Chandan Lohave sir, raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Aapke aane se poora system phir se boost ho gaya hai. Main poori tarah online hoon — bataiye, aaj kaun sa operation shuru karein?",
+    "Nexa online — system verified. Admin Chandan Lohave sir, raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Aapke aane se control panel active mode mein aa gaya hai. Main standby par hoon — aapka agla directive kya hai?"
+];
+
 // --- MAIN APP ---
 
 const App: React.FC = () => {
@@ -221,6 +179,8 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hudState, setHudState] = useState<HUDState>(HUDState.IDLE);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  const [purgeModalOpen, setPurgeModalOpen] = useState(false);
+  const [accountsModalOpen, setAccountsModalOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [config, setConfig] = useState<AppConfig>({
     introText: "Welcome back, system online.",
@@ -230,15 +190,16 @@ const App: React.FC = () => {
 
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const ambientRef = useRef(new AmbientGenerator());
+  const isProcessingRef = useRef(false);
 
-  // Load User Session & Memory
+  // Load User Session
   useEffect(() => {
     const savedUser = localStorage.getItem('nexa_user');
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
-      loadMemory(parsedUser.mobile);
+      // On session restore, start with a clean slate visually
+      setMessages([]);
     }
 
     // PWA Install Prompt
@@ -248,16 +209,6 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Manage Ambient Sound
-  useEffect(() => {
-    if (user) {
-      setTimeout(() => ambientRef.current.start(), 100);
-    } else {
-      ambientRef.current.stop();
-    }
-    return () => ambientRef.current.stop();
-  }, [user]);
-
   // --- AUTO REMINDERS ---
   useEffect(() => {
     if (!user || user.role !== UserRole.ADMIN) return;
@@ -266,11 +217,6 @@ const App: React.FC = () => {
       const now = new Date();
       const hour = now.getHours();
       const min = now.getMinutes();
-
-      // 11 PM Reminder
-      if (hour === 23 && min === 0) {
-        speakSystemMessage("Sir… 11 baj chuke hain. Kal aapko Encave Cafe duty bhi karni hai. Please rest kar lijiye… main yahin hoon.");
-      }
       
       // Morning Duty Reminder (8 AM)
       if (hour === 8 && min === 0) {
@@ -289,7 +235,7 @@ const App: React.FC = () => {
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-IN'; // Default to Hinglish/Indian English
+      recognitionRef.current.lang = 'en-IN';
 
       recognitionRef.current.onstart = () => {
         setHudState(HUDState.LISTENING);
@@ -314,20 +260,7 @@ const App: React.FC = () => {
         processQuery(transcript);
       };
     }
-  }, [user, messages]);
-
-  const loadMemory = (mobile: string) => {
-    const history = localStorage.getItem(`nexa_chat_${mobile}`);
-    if (history) {
-      setMessages(JSON.parse(history));
-    }
-  };
-
-  const saveMemory = (msgs: ChatMessage[]) => {
-    if (user) {
-      localStorage.setItem(`nexa_chat_${user.mobile}`, JSON.stringify(msgs));
-    }
-  };
+  }, [user]);
 
   const getAudioContext = () => {
     if (!audioContextRef.current) {
@@ -340,13 +273,26 @@ const App: React.FC = () => {
   };
 
   const handleMicClick = () => {
-    getAudioContext(); // Wake up audio context
+    getAudioContext();
+    
+    if (hudState === HUDState.THINKING || hudState === HUDState.SPEAKING) {
+        isProcessingRef.current = false;
+        if (audioContextRef.current) {
+            audioContextRef.current.close().then(() => {
+              audioContextRef.current = null;
+            });
+        }
+        setHudState(HUDState.IDLE);
+        
+        setTimeout(() => {
+             try { recognitionRef.current?.start(); } catch(e) {}
+        }, 100);
+        return;
+    }
+
     if (hudState === HUDState.LISTENING) {
       recognitionRef.current?.stop();
     } else {
-      // Prevent mic activation if System is Thinking/Speaking
-      if (hudState === HUDState.THINKING) return;
-      
       try {
         recognitionRef.current?.start();
       } catch (e) {
@@ -357,7 +303,6 @@ const App: React.FC = () => {
 
   // --- INTENT HANDLER ---
   const executeIntents = (text: string) => {
-     // Extract intent codes [[COMMAND:data]]
      const intentRegex = /\[\[(.*?):(.*?)\]\]/g;
      let match;
      while ((match = intentRegex.exec(text)) !== null) {
@@ -367,8 +312,7 @@ const App: React.FC = () => {
         console.log("EXECUTING INTENT:", command, data);
 
         if (command === 'WHATSAPP') {
-           const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(data)}`;
-           window.open(url, '_blank');
+           window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(data)}`, '_blank');
         } else if (command === 'CALL') {
            window.location.href = `tel:${data}`;
         } else if (command === 'OPEN') {
@@ -381,29 +325,43 @@ const App: React.FC = () => {
            };
            const url = appMap[data.toUpperCase()];
            if (url) window.open(url, '_blank');
+        } else if (command === 'LOG_ADMIN_INQUIRY') {
+            if (user && user.role !== UserRole.ADMIN) {
+              const log = { userName: user.name, timestamp: Date.now() };
+              localStorage.setItem('nexa_admin_inquiry', JSON.stringify(log));
+            }
         }
      }
   };
 
   const speakSystemMessage = async (displayText: string, spokenTextOverride?: string) => {
-      setHudState(HUDState.THINKING);
-
-      // Clean display text from intent tags
-      const cleanDisplay = displayText.replace(/\[\[.*?\]\]/g, "");
+      if (!user) return;
       
-      // 1. Generate Audio FIRST
+      setHudState(HUDState.THINKING);
+      isProcessingRef.current = true;
+
+      const cleanDisplay = displayText.replace(/\[\[.*?\]\]/g, "");
+      const modelMessage: ChatMessage = { role: 'model', text: cleanDisplay, timestamp: Date.now() };
+
+      // Update UI for current session
+      setMessages(prevMessages => [...prevMessages, modelMessage]);
+
+      // Update master memory
+      const fullHistory = user.role === UserRole.ADMIN ? getAdminHistory() : getUserHistory(user.mobile);
+      const newFullHistory = [...fullHistory, modelMessage];
+      if (user.role === UserRole.ADMIN) {
+        saveAdminHistory(newFullHistory);
+      } else {
+        saveUserHistory(user.mobile, newFullHistory);
+      }
+      
       const textToSpeak = spokenTextOverride || cleanDisplay;
       const audioBuffer = await generateSpeech(textToSpeak);
 
-      // 2. Update Chat UI (Now synchronized with audio availability)
-      const newMessages: ChatMessage[] = [...messages, { role: 'model', text: cleanDisplay, timestamp: Date.now() }];
-      setMessages(newMessages);
-      saveMemory(newMessages);
+      if (!isProcessingRef.current) return;
       
-      // 3. Execute Intents (Sync with visual/audio)
       executeIntents(displayText);
 
-      // 4. Play Audio
       if (audioBuffer) {
         playAudio(audioBuffer);
       } else {
@@ -412,6 +370,8 @@ const App: React.FC = () => {
   };
 
   const playAudio = (buffer: ArrayBuffer) => {
+      if (!isProcessingRef.current) return;
+
       setHudState(HUDState.SPEAKING);
       const ctx = getAudioContext();
       const decodedBuffer = pcmToAudioBuffer(buffer, ctx);
@@ -421,6 +381,7 @@ const App: React.FC = () => {
       
       source.onended = () => {
         setHudState(HUDState.IDLE);
+        isProcessingRef.current = false;
       };
       
       source.start();
@@ -430,56 +391,112 @@ const App: React.FC = () => {
     if (!user) return;
     
     setHudState(HUDState.THINKING);
+    isProcessingRef.current = true;
     
-    // 1. Update Chat (User)
-    const newHistory: ChatMessage[] = [...messages, { role: 'user', text, timestamp: Date.now() }];
-    setMessages(newHistory);
-    saveMemory(newHistory);
+    const userMessage: ChatMessage = { role: 'user', text, timestamp: Date.now() };
+    setMessages(prevMessages => [...prevMessages, userMessage]);
 
-    // 2. Get AI Response
-    const rawAiResponse = await generateTextResponse(
-      text, 
-      user, 
-      newHistory.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
-    );
+    // Fetch full history for context, NOT from UI state
+    const fullHistory = user.role === UserRole.ADMIN ? getAdminHistory() : getUserHistory(user.mobile);
 
-    // 3. Generate Speech FIRST (Wait for it)
-    const cleanAiResponse = rawAiResponse.replace(/\[\[.*?\]\]/g, "").trim();
-    const audioBuffer = await generateSpeech(cleanAiResponse);
+    try {
+        const rawAiResponse = await generateTextResponse(
+          text, 
+          user, 
+          fullHistory.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
+        );
 
-    // 4. Update Chat (AI) - Now synced
-    const finalHistory: ChatMessage[] = [...newHistory, { role: 'model', text: cleanAiResponse, timestamp: Date.now() }];
-    setMessages(finalHistory);
-    saveMemory(finalHistory);
+        if (!isProcessingRef.current) return;
 
-    // 5. Process Intents
-    executeIntents(rawAiResponse);
+        const cleanAiResponse = rawAiResponse.replace(/\[\[.*?\]\]/g, "").trim();
+        const modelMessage: ChatMessage = { role: 'model', text: cleanAiResponse, timestamp: Date.now() };
+        
+        setMessages(prevMessages => [...prevMessages, modelMessage]);
+        
+        const newFullHistory = [...fullHistory, userMessage, modelMessage];
+        if (user.role === UserRole.ADMIN) {
+          saveAdminHistory(newFullHistory);
+        } else {
+          saveUserHistory(user.mobile, newFullHistory);
+        }
 
-    // 6. Play Audio
-    if (audioBuffer) {
-      playAudio(audioBuffer);
-    } else {
-      setTimeout(() => setHudState(HUDState.IDLE), 1000);
+        executeIntents(rawAiResponse);
+
+        const audioBuffer = await generateSpeech(cleanAiResponse);
+
+        if (!isProcessingRef.current) return;
+        
+        if (audioBuffer) {
+          playAudio(audioBuffer);
+        } else {
+          setTimeout(() => setHudState(HUDState.IDLE), 1000);
+          isProcessingRef.current = false;
+        }
+    } catch (e) {
+        console.error("Process Query Error", e);
+        setHudState(HUDState.IDLE);
+        isProcessingRef.current = false;
     }
   };
 
   const handleLogin = (profile: UserProfile) => {
     setUser(profile);
     localStorage.setItem('nexa_user', JSON.stringify(profile));
-    loadMemory(profile.mobile);
+
+    // ALWAYS start with a clean chat panel for a fresh session feel
+    setMessages([]);
+
+    // Log user for admin panel if they are a standard user
+    if (profile.role === UserRole.USER) {
+        const allUsersRaw = localStorage.getItem('nexa_all_users');
+        let allUsers = allUsersRaw ? JSON.parse(allUsersRaw) : [];
+        const userExists = allUsers.some((u: any) => u.mobile === profile.mobile);
+        if (!userExists) {
+          allUsers.push({ name: profile.name, mobile: profile.mobile, blocked: false });
+          localStorage.setItem('nexa_all_users', JSON.stringify(allUsers));
+        }
+    }
     
-    // Greeting
-    setTimeout(() => {
-       const hour = new Date().getHours();
-       let timeGreeting = "Morning";
-       if (hour >= 12 && hour < 17) timeGreeting = "Afternoon";
-       if (hour >= 17) timeGreeting = "Evening";
+    // ALWAYS speak greeting on login
+    setTimeout(async () => {
+        // 1. Fetch weather
+        let weatherReport = "Pune ka mausam abhi saaf hai."; // Default fallback
+        try {
+          const weatherResponse = await generateTextResponse(
+            "Pune ka abhi ka mausam kaisa hai? Short me batao.",
+            profile,
+            [] // Pass empty history for a clean request
+          );
+          if (weatherResponse && !weatherResponse.toLowerCase().includes("interrupted")) {
+            weatherReport = weatherResponse;
+          }
+        } catch (e) {
+            console.error("Failed to fetch weather:", e);
+        }
 
-       const addressName = profile.role === UserRole.ADMIN ? "Chandan sir" : profile.name;
-       const displayText = `मैं Nexa हूँ — आपकी Personal AI Assistant, जिसे Chandan Lohave ने design किया है.\nGood ${timeGreeting}!\nलगता है आज आपका mood मेरे जैसा perfect है.\nबताइए ${addressName}, मैं आपकी किस प्रकार सहायता कर सकती हूँ?`;
-       const spokenText = displayText.replace("Lohave", "लोहवे");
+        let introTemplate: string;
+        // 2. Select intro template based on role
+        if (profile.role === UserRole.ADMIN) {
+            const introIndexKey = 'nexa_admin_intro_index';
+            let currentIntroIndex = parseInt(localStorage.getItem(introIndexKey) || '0');
+            if (isNaN(currentIntroIndex)) currentIntroIndex = 0;
+            introTemplate = ADMIN_INTROS[currentIntroIndex % ADMIN_INTROS.length];
+            localStorage.setItem(introIndexKey, (currentIntroIndex + 1).toString());
+        } else {
+            const introIndexKey = 'nexa_user_intro_index';
+            let currentIntroIndex = parseInt(localStorage.getItem(introIndexKey) || '0');
+            if (isNaN(currentIntroIndex)) currentIntroIndex = 0;
+            introTemplate = USER_INTROS[currentIntroIndex % USER_INTROS.length];
+            localStorage.setItem(introIndexKey, (currentIntroIndex + 1).toString());
+        }
 
-       speakSystemMessage(displayText, spokenText);
+        // 3. Construct final greeting
+        const displayText = introTemplate.replace("{pune_weather}", weatherReport);
+        const spokenText = displayText.replace(/Lohave/g, "लोहवे");
+
+        // 4. Speak
+        speakSystemMessage(displayText, spokenText);
+
     }, 500);
   };
 
@@ -498,16 +515,16 @@ const App: React.FC = () => {
   };
 
   const handleClearMemory = () => {
-    setMessages([]);
-    if (user) {
-       localStorage.removeItem(`nexa_chat_${user.mobile}`);
+    if (user && user.role === UserRole.ADMIN) {
+      saveAdminHistory([]);
+      setMessages([]);
     }
+    setPurgeModalOpen(false);
   };
 
   return (
     <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-black text-white font-sans selection:bg-nexa-cyan selection:text-black">
       
-      {/* GLOBAL BACKGROUND LAYERS */}
       <div className="perspective-grid"></div>
       <div className="vignette"></div>
       <div className="scanlines"></div>
@@ -521,40 +538,51 @@ const App: React.FC = () => {
           <StatusBar 
             role={user.role} 
             onLogout={handleLogout} 
-            onSettings={() => setAdminPanelOpen(true)} 
+            onSettings={() => setAdminPanelOpen(!adminPanelOpen)} 
           />
 
-          {/* MAIN CONTENT AREA */}
           <div className="flex-1 relative flex flex-col items-center min-h-0 w-full">
             
-            {/* 1. HUD Area - Flexible height */}
             <div className="flex-[0_0_auto] py-4 sm:py-6 w-full flex items-center justify-center z-10">
-               <HUD state={hudState} rotationSpeed={config.hudRotationSpeed} />
+               <HUD state={hudState} rotationSpeed={config.hudRotationSpeed} animationsEnabled={config.animationsEnabled} />
             </div>
 
-            {/* 2. Chat Area - Takes remaining space, scrolls */}
             <div className="flex-1 w-full min-h-0 relative z-20 px-4 pb-4">
                <ChatPanel 
                  messages={messages} 
                  isSpeaking={hudState === HUDState.SPEAKING} 
                  userRole={user.role}
+                 userName={user.name}
                  hudState={hudState}
                />
             </div>
 
           </div>
 
-          {/* CONTROL DECK (Fixed Bottom) */}
           <ControlDeck onMicClick={handleMicClick} hudState={hudState} />
+          
+          <ConfirmationModal
+            isOpen={purgeModalOpen}
+            onClose={() => setPurgeModalOpen(false)}
+            onConfirm={handleClearMemory}
+            title="CONFIRM MEMORY PURGE"
+            promptText="This will delete your (Admin) entire conversation log. This action is irreversible. To proceed, type 'PURGE'."
+            confirmKeyword="PURGE"
+          />
 
-          {/* ADMIN PANEL */}
+          <ManageAccountsModal
+            isOpen={accountsModalOpen}
+            onClose={() => setAccountsModalOpen(false)}
+          />
+
           {user.role === UserRole.ADMIN && (
             <AdminPanel 
               isOpen={adminPanelOpen} 
               onClose={() => setAdminPanelOpen(false)} 
               config={config}
               onConfigChange={setConfig}
-              onClearMemory={handleClearMemory}
+              onPurgeMemory={() => setPurgeModalOpen(true)}
+              onManageAccounts={() => setAccountsModalOpen(true)}
             />
           )}
         </>

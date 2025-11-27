@@ -5,9 +5,10 @@ import { HUDState } from '../types';
 interface HUDProps {
   state: HUDState;
   rotationSpeed?: number;
+  animationsEnabled: boolean;
 }
 
-const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
+const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1, animationsEnabled }) => {
   // Determine colors based on state
   let primaryColor = "text-nexa-cyan";
   let borderColor = "border-nexa-cyan";
@@ -29,6 +30,10 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
   // Common glow classes
   const glowClass = `shadow-[0_0_15px_rgba(var(--tw-shadow-color),0.5)] ${shadowColor}`;
   const intenseGlow = `shadow-[0_0_30px_rgba(var(--tw-shadow-color),0.8)] ${shadowColor}`;
+  
+  const animationStyle = { 
+    animationPlayState: animationsEnabled ? 'running' : 'paused' 
+  };
 
   return (
     <div className={`relative flex items-center justify-center transition-all duration-500 ${state === HUDState.SPEAKING ? 'scale-105' : 'scale-100'}`}>
@@ -37,8 +42,8 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
       <div className={`hidden xs:flex flex-col items-end mr-3 opacity-80 transition-opacity duration-500`}>
         <div className="flex items-center">
            {/* Mini Rotating Rings */}
-           <div className={`relative w-10 h-10 rounded-full border ${borderColor} flex items-center justify-center animate-spin-reverse-slow`}>
-              <div className={`w-6 h-6 rounded-full border border-dashed ${borderColor} opacity-60 animate-spin`}></div>
+           <div className={`relative w-10 h-10 rounded-full border ${borderColor} flex items-center justify-center animate-spin-reverse-slow`} style={animationStyle}>
+              <div className={`w-6 h-6 rounded-full border border-dashed ${borderColor} opacity-60 animate-spin`} style={animationStyle}></div>
               <div className={`absolute top-0 w-1 h-1 ${bgGlow} rounded-full shadow-[0_0_5px_currentColor]`}></div>
            </div>
            {/* Connecting Line to Main HUD */}
@@ -61,13 +66,13 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
         {/* 2. Outer Ring - Thick Dashed with Gap */}
         <div 
           className={`absolute w-full h-full rounded-full border-2 border-dashed ${borderColor} opacity-60 animate-spin-slow transition-colors duration-500 mask-radial`}
-          style={{ animationDuration: `${12 / rotationSpeed}s` }}
+          style={{ ...animationStyle, animationDuration: `${12 / rotationSpeed}s` }}
         ></div>
 
         {/* 3. Middle Orbit Ring (Thin) */}
         <div 
           className={`absolute w-[88%] h-[88%] rounded-full border-[0.5px] ${borderColor} opacity-40 animate-spin transition-colors duration-500`}
-          style={{ animationDuration: `${20 / rotationSpeed}s` }}
+          style={{ ...animationStyle, animationDuration: `${20 / rotationSpeed}s` }}
         >
           {/* Orbiting Dot */}
           <div className={`absolute top-1/2 -right-1 w-1.5 h-1.5 ${bgGlow} rounded-full shadow-[0_0_10px_currentColor]`}></div>
@@ -76,13 +81,13 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
         {/* 4. Inner Tech Ring (Counter Rotate) */}
         <div 
           className={`absolute w-[78%] h-[78%] rounded-full border-2 ${borderColor} border-t-transparent border-l-transparent opacity-80 animate-spin-reverse-slow transition-colors duration-500 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]`}
-          style={{ animationDuration: `${8 / rotationSpeed}s` }}
+          style={{ ...animationStyle, animationDuration: `${8 / rotationSpeed}s` }}
         ></div>
 
         {/* 5. Innermost Dashed Ring */}
         <div 
           className={`absolute w-[60%] h-[60%] rounded-full border border-dashed ${borderColor} opacity-50 animate-spin`}
-          style={{ animationDuration: `${15 / rotationSpeed}s` }}
+          style={{ ...animationStyle, animationDuration: `${15 / rotationSpeed}s` }}
         ></div>
 
         {/* 6. Static/Pulsing Core */}
@@ -121,7 +126,7 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1 }) => {
            {/* Rotating Triangle Container */}
            <div className="relative w-10 h-10 flex items-center justify-center">
               {/* Triangle (SVG) */}
-              <svg className={`w-8 h-8 ${primaryColor} animate-spin-slow opacity-80`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+              <svg className={`w-8 h-8 ${primaryColor} animate-spin-slow opacity-80`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={animationStyle}>
                  <path d="M12 2L2 22h20L12 2z" />
               </svg>
               {/* Center Dot */}
