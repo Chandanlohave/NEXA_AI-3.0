@@ -94,13 +94,14 @@ const HUD: React.FC<HUDProps> = ({ state, rotationSpeed = 1, animationsEnabled }
         <div className={`absolute w-[45%] h-[45%] rounded-full border ${borderColor} opacity-30 ${state === HUDState.SPEAKING ? 'animate-pulse-fast bg-white/5' : ''}`}></div>
 
         {/* 7. Center Text */}
-        <div className={`relative z-10 text-3xl sm:text-4xl font-light tracking-[0.15em] ${primaryColor} font-mono transition-colors duration-500 drop-shadow-[0_0_5px_rgba(0,0,0,0.8)]`}>
-          NEXA
-        </div>
-
-        {/* 7b. STATUS TEXT */}
-        <div className={`absolute mt-20 text-[9px] sm:text-[10px] tracking-[0.3em] font-mono ${primaryColor} animate-pulse uppercase opacity-80`}>
-           {state}
+        <div className="flex flex-col items-center justify-center relative z-10 drop-shadow-[0_0_5px_rgba(0,0,0,0.8)]">
+            <div className={`text-3xl sm:text-4xl font-light tracking-[0.15em] ${primaryColor} font-mono transition-colors duration-500`}>
+            NEXA
+            </div>
+            {/* 7b. STATUS TEXT - NEWLY ADDED BELOW LOGO */}
+            <div className={`mt-1 text-[9px] sm:text-[10px] tracking-[0.3em] font-mono ${primaryColor} animate-pulse uppercase opacity-90`}>
+            [{state}]
+            </div>
         </div>
         
         {/* 8. Micro-ornaments (Top/Bottom) */}

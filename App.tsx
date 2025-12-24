@@ -1,21 +1,17 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { LiveServerMessage } from '@google/genai';
 import Auth from './components/Auth';
 import HUD from './components/HUD';
 import ChatPanel from './components/ChatPanel';
 import AdminPanel from './components/AdminPanel';
 import ManageAccountsModal from './components/ManageAccountsModal';
-import { UserProfile, UserRole, HUDState, ChatMessage, AppConfig } from './types';
-import { generateTextResponse, generateSpeech } from './services/geminiService';
+import { UserProfile, UserRole, HUDState, ChatMessage, AppConfig, StoredUser } from './types';
+import { generateTextResponse, generateSpeech, ERROR_MESSAGES, LiveSessionManager, arrayBufferToBase64, base64ToUint8Array, float32ToInt16 } from './services/geminiService';
 import { getAdminHistory, saveAdminHistory, getUserHistory, saveUserHistory } from './services/memoryService';
+import { playReactorActiveSound, playReactorDeactiveSound, playSecurityAlertSound } from './services/soundService';
 
 // --- ICONS ---
-
-const GearIcon = () => (
-  <svg className="w-5 h-5 text-nexa-cyan/80 hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 1.9-.94 3.31-.826 3.31-2.37 0-3.35-.426-3.35-2.924 0-3.35a1.724 1.724 0 00-1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.94 1.543 2.924 1.543 3.35 0a1.724 1.724 0 002.573-1.066c1.543.94 3.31-.826 2.37-1.9.94-3.31.826-3.31 2.37 0 3.35.426 3.35 2.924 0 3.35a1.724 1.724 0 001.066 2.573c.94 1.543-.826 3.31-2.37 2.37-.94-1.543-2.924-1.543-3.35 0a1.724 1.724 0 00-2.573 1.066c-1.543-.94-3.31.826-2.37 1.9zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
 
 const LogoutIcon = () => (
   <svg className="w-5 h-5 text-nexa-cyan/80 hover:text-red-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -23,11 +19,11 @@ const LogoutIcon = () => (
   </svg>
 );
 
-const MicIcon = () => (
-  <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-    {/* Futuristic Frequency Mic */}
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m-4-12v8m8-8v8m-12-5v2m16-2v2" />
-  </svg>
+const SettingsIcon = () => (
+    <svg className="w-5 h-5 text-nexa-cyan/80 hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
 );
 
 // --- COMPONENTS ---
@@ -59,6 +55,11 @@ const InstallBanner: React.FC<{ prompt: any, onInstall: () => void }> = ({ promp
 
 const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, promptText, confirmKeyword }: any) => {
     const [input, setInput] = useState('');
+    
+    useEffect(() => {
+        if (isOpen) setInput('');
+    }, [isOpen]);
+
     if (!isOpen) return null;
 
     return (
@@ -69,7 +70,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, promptText, conf
                 <input
                     type="text"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => setInput(e.target.value.toUpperCase())}
                     className="w-full bg-red-900/20 border border-red-500/50 text-white text-center font-mono tracking-[0.3em] uppercase p-2 focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder={`TYPE '${confirmKeyword}'`}
                 />
@@ -93,502 +94,675 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, promptText, conf
     );
 };
 
-const StatusBar = ({ role, onLogout, onSettings }: any) => (
-  <div className="w-full h-16 shrink-0 flex justify-between items-center px-6 border-b border-nexa-cyan/10 bg-black/80 backdrop-blur-md z-40 relative">
-    <div className="flex items-center gap-4">
-       <div className="flex flex-col items-start">
-         <div className="text-[10px] text-nexa-cyan font-mono tracking-widest uppercase">System Online</div>
-         <div className="flex gap-1 mt-1">
-            <div className="w-8 h-1 bg-nexa-cyan shadow-[0_0_5px_currentColor]"></div>
-            <div className="w-2 h-1 bg-nexa-cyan/50"></div>
-            <div className="w-1 h-1 bg-nexa-cyan/20"></div>
-         </div>
-       </div>
+interface StatusBarProps {
+    onLogout: () => void;
+    isAdmin: boolean;
+    onSettings?: () => void;
+}
+
+const StatusBar: React.FC<StatusBarProps> = ({ onLogout, onSettings, isAdmin }) => (
+  <div className="w-full h-12 shrink-0 flex justify-between items-center px-4 border-b border-nexa-cyan/20 bg-black/50 backdrop-blur-sm z-40 relative">
+    <div className="flex items-center gap-2">
+      <div className="text-[10px] text-nexa-cyan font-mono tracking-widest uppercase">System Online</div>
+      <div className="flex gap-1 items-center">
+        <div className="w-6 h-1 bg-nexa-cyan shadow-[0_0_5px_currentColor]"></div>
+        <div className="w-2 h-1 bg-nexa-cyan/50"></div>
+      </div>
     </div>
     
     <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 pointer-events-none">
-       <div className="text-xl font-bold tracking-[0.3em] text-white/90 drop-shadow-[0_0_10px_rgba(41,223,255,0.5)]">NEXA</div>
+       <div className="text-xl font-bold tracking-[0.4em] text-white/90 drop-shadow-[0_0_10px_rgba(41,223,255,0.5)]">NEXA</div>
     </div>
 
-    <div className="flex items-center gap-4">
-       {role === UserRole.ADMIN && (
-          <button onClick={onSettings} className="p-2 hover:bg-nexa-cyan/10 rounded-full transition-colors"><GearIcon /></button>
+    <div className="flex items-center gap-2">
+       {isAdmin && (
+           <button onClick={onSettings} className="p-2 bg-zinc-900/50 hover:bg-nexa-cyan/20 rounded-full transition-colors border border-transparent hover:border-nexa-cyan/30">
+               <SettingsIcon />
+           </button>
        )}
-       <button onClick={onLogout} className="p-2 hover:bg-red-500/10 rounded-full transition-colors"><LogoutIcon /></button>
+       <button onClick={onLogout} className="p-2 hover:bg-red-500/10 rounded-full transition-colors group">
+           <LogoutIcon />
+       </button>
     </div>
   </div>
 );
 
-const ControlDeck = ({ onMicClick, hudState }: any) => {
-    return (
-        <div className="w-full h-24 shrink-0 bg-gradient-to-t from-black via-black/90 to-transparent z-40 relative flex items-center justify-center pb-6">
-           <div className="absolute bottom-0 w-full h-[1px] bg-nexa-cyan/30"></div>
-           
-           {/* Decorative lines */}
-           <div className="absolute left-10 bottom-10 w-24 h-[1px] bg-nexa-cyan/20 rotate-[-15deg] hidden sm:block"></div>
-           <div className="absolute right-10 bottom-10 w-24 h-[1px] bg-nexa-cyan/20 rotate-[15deg] hidden sm:block"></div>
+const ArcReactor = ({ state, config }: { state: HUDState; config: AppConfig }) => {
+  const isSpeakingOrListening = state === HUDState.LISTENING || state === HUDState.SPEAKING;
+  
+  let coreColor = 'text-nexa-cyan';
+  let glowColor = 'shadow-nexa-cyan';
+  let borderColor = 'border-nexa-cyan';
+  let bgColor = 'bg-nexa-cyan';
+  
+  if (state === HUDState.LISTENING) {
+      coreColor = 'text-red-500';
+      glowColor = 'shadow-red-500';
+      borderColor = 'border-red-500';
+      bgColor = 'bg-red-500';
+  } else if (state === HUDState.THINKING) {
+      coreColor = 'text-nexa-yellow';
+      glowColor = 'shadow-nexa-yellow';
+      borderColor = 'border-nexa-yellow';
+      bgColor = 'bg-nexa-yellow';
+  }
 
-           {/* Hex Mic Button */}
-           <button 
-             onClick={onMicClick}
-             className={`
-               relative w-20 h-20 flex items-center justify-center transition-all duration-300 group
-               ${hudState === HUDState.LISTENING ? 'scale-110' : 'hover:scale-105 active:scale-95'}
-             `}
-           >
-             {/* Hexagon Backgrounds */}
-             <div className={`absolute inset-0 bg-black border ${hudState === HUDState.LISTENING ? 'border-nexa-red shadow-[0_0_30px_rgba(255,42,42,0.6)]' : 'border-nexa-cyan shadow-[0_0_20px_rgba(41,223,255,0.4)]'} transition-all duration-300`} style={{ clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' }}></div>
-             
-             {/* Icon */}
-             <div className={`relative z-10 ${hudState === HUDState.LISTENING ? 'text-nexa-red animate-pulse' : 'text-nexa-cyan group-hover:text-white'} transition-colors`}>
-                <MicIcon />
-             </div>
-           </button>
+  return (
+    // Outer Container scales but does NOT rotate
+    <div 
+        className={`relative w-16 h-16 flex items-center justify-center transition-all duration-300 ${isSpeakingOrListening ? 'scale-110' : 'scale-100'}`}
+    >
+        {/* Rotation Wrapper - FORCED ANIMATION VIA STYLE */}
+        <div 
+            className="absolute inset-0 w-full h-full" 
+            style={{ 
+                animation: config.micRotationEnabled ? `spin ${5 / config.micRotationSpeed}s linear infinite` : 'none' 
+            }}
+        >
+             <div className="absolute inset-0 rounded-full border-[3px] border-zinc-800 bg-black shadow-[0_0_15px_rgba(0,0,0,0.8)] z-0"></div>
+             <div className={`absolute inset-1 rounded-full border-2 ${borderColor} opacity-80 ${glowColor} shadow-[0_0_10px_currentColor] z-10 ${isSpeakingOrListening ? 'animate-pulse' : ''}`}></div>
+        </div>
+
+        {/* Core elements that don't rotate with the outer ring */}
+        <div 
+            className={`absolute inset-0 z-20`}
+            style={config.micRotationEnabled ? { 
+              animation: `spin-reverse ${state === HUDState.THINKING ? 1.5 / config.micRotationSpeed : 4 / config.micRotationSpeed}s linear infinite` 
+            } : {}}
+        >
+             <svg viewBox="0 0 100 100" className={`w-full h-full ${coreColor}`}>
+                {Array.from({ length: 10 }).map((_, i) => (
+                    <rect 
+                        key={i} 
+                        x="46" 
+                        y="6" 
+                        width="8" 
+                        height="14" 
+                        rx="1"
+                        transform={`rotate(${i * 36} 50 50)`} 
+                        fill="currentColor"
+                        className="drop-shadow-[0_0_2px_currentColor]"
+                        opacity="0.9"
+                    />
+                ))}
+                <circle cx="50" cy="50" r="28" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+             </svg>
+        </div>
+        <div className="absolute w-8 h-8 rounded-full bg-black border border-zinc-700 z-30 flex items-center justify-center">
+            <div className={`w-4 h-4 rounded-full ${bgColor} ${glowColor} shadow-[0_0_15px_currentColor] animate-pulse`}></div>
+            <div className="absolute w-full h-full rounded-full border border-white/20 opacity-50"></div>
+        </div>
+        <div className="absolute inset-2 rounded-full bg-gradient-to-tr from-white/10 to-transparent opacity-40 z-40 pointer-events-none"></div>
+    </div>
+  );
+};
+
+const ControlDeck = ({ onMicClick, hudState, config }: any) => {
+    return (
+        <div 
+          onClick={onMicClick}
+          className="w-full h-24 shrink-0 bg-gradient-to-t from-black via-black/90 to-transparent z-40 relative flex items-center justify-center cursor-pointer group pb-4"
+        >
+           <div className="absolute bottom-1/2 left-0 w-[calc(50%-40px)] h-[1px] bg-gradient-to-r from-transparent via-nexa-cyan/20 to-nexa-cyan/50"></div>
+           <div className="absolute bottom-1/2 right-0 w-[calc(50%-40px)] h-[1px] bg-gradient-to-l from-transparent via-nexa-cyan/20 to-nexa-cyan/50"></div>
+           <ArcReactor state={hudState} config={config} />
         </div>
     );
 }
 
-// --- AUDIO UTILS ---
-
-const pcmToAudioBuffer = (pcmData: ArrayBuffer, context: AudioContext): AudioBuffer => {
-  const int16Array = new Int16Array(pcmData);
-  const float32Array = new Float32Array(int16Array.length);
-  for (let i = 0; i < int16Array.length; i++) {
-    float32Array[i] = int16Array[i] / 32768;
+// Helper to decode PCM for the playback queue
+async function decodeAudioData(
+    data: Uint8Array,
+    ctx: AudioContext,
+    sampleRate: number = 24000,
+    numChannels: number = 1,
+  ): Promise<AudioBuffer> {
+    const dataInt16 = new Int16Array(data.buffer);
+    const frameCount = dataInt16.length / numChannels;
+    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  
+    for (let channel = 0; channel < numChannels; channel++) {
+      const channelData = buffer.getChannelData(channel);
+      for (let i = 0; i < frameCount; i++) {
+        channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      }
+    }
+    return buffer;
   }
-  const buffer = context.createBuffer(1, float32Array.length, 24000); 
-  buffer.getChannelData(0).set(float32Array);
-  return buffer;
-};
-
-// --- GREETING PROMPTS ---
-const USER_INTROS = [
-    "मैं Nexa हूँ। Sir, raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Ab bataiye, aaj main aapki kaise madad kar sakti hoon?",
-    "मैं Nexa हूँ, aapki Personal AI Assistant, jise Chandan Lohave ne design kiya hai. Raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Aapse judna hamesha achha lagta hai. Bataiye, main aapki kis prakaar sahayata kar sakti hoon?",
-];
-
-const ADMIN_INTROS = [
-    "मैं Nexa हूँ, aapki Personal AI Assistant. Admin Chandan Lohave sir, raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Aapke aane se poora system phir se boost ho gaya hai. Main poori tarah online hoon — bataiye, aaj kaun sa operation shuru karein?",
-    "Nexa online — system verified. Admin Chandan Lohave sir, raat ke ek baj kar athavan minute ho rahe hai, aaj tarikh athais November do hajar pachis hai. {pune_weather} Aapke aane se control panel active mode mein aa gaya hai. Main standby par hoon — aapka agla directive kya hai?"
-];
-
-// --- MAIN APP ---
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [hudState, setHudState] = useState<HUDState>(HUDState.IDLE);
-  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
-  const [purgeModalOpen, setPurgeModalOpen] = useState(false);
-  const [accountsModalOpen, setAccountsModalOpen] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<any>(null);
-  const [config, setConfig] = useState<AppConfig>({
-    introText: "Welcome back, system online.",
-    animationsEnabled: true,
-    hudRotationSpeed: 1,
-  });
-
-  const recognitionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const isProcessingRef = useRef(false);
-
-  // Load User Session
-  useEffect(() => {
-    const savedUser = localStorage.getItem('nexa_user');
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setUser(parsedUser);
-      // On session restore, start with a clean slate visually
-      setMessages([]);
-    }
-
-    // PWA Install Prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      setInstallPrompt(e);
+    const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+    const [hudState, setHudState] = useState<HUDState>(HUDState.IDLE);
+    const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [isRequestPending, setIsRequestPending] = useState(false);
+    const [config, setConfig] = useState<AppConfig>({
+        introText: "Welcome",
+        animationsEnabled: true,
+        hudRotationSpeed: 1,
+        micRotationEnabled: true,
+        micRotationSpeed: 1,
     });
-  }, []);
+    const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+    const [isAccountsModalOpen, setIsAccountsModalOpen] = useState(false);
+    const [isPurgeModalOpen, setIsPurgeModalOpen] = useState(false);
+    const [installPrompt, setInstallPrompt] = useState<any>(null);
+    const [location, setLocation] = useState<{latitude: number, longitude: number} | null>(null);
 
-  // --- AUTO REMINDERS ---
-  useEffect(() => {
-    if (!user || user.role !== UserRole.ADMIN) return;
+    // --- MEMORY BANK REFERENCE ---
+    const memoryBankRef = useRef<ChatMessage[]>([]);
 
-    const checkTime = () => {
-      const now = new Date();
-      const hour = now.getHours();
-      const min = now.getMinutes();
-      
-      // Morning Duty Reminder (8 AM)
-      if (hour === 8 && min === 0) {
-        speakSystemMessage("Sir… aaj Encave Café duty hai, time se tayar ho jaiye.");
-      }
-    };
-
-    const interval = setInterval(checkTime, 60000); // Check every minute
-    return () => clearInterval(interval);
-  }, [user]);
-
-  // Initialize Speech Recognition
-  useEffect(() => {
-    if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-IN';
-
-      recognitionRef.current.onstart = () => {
-        setHudState(HUDState.LISTENING);
-      };
-
-      recognitionRef.current.onend = () => {
-        if (hudState === HUDState.LISTENING) {
-          setHudState(HUDState.IDLE);
-        }
-      };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech Error", event.error);
-        if (event.error === 'aborted' || event.error === 'no-speech') {
-           return; 
-        }
-        setHudState(HUDState.IDLE);
-      };
-
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        processQuery(transcript);
-      };
-    }
-  }, [user]);
-
-  const getAudioContext = () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    if (audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume();
-    }
-    return audioContextRef.current;
-  };
-
-  const handleMicClick = () => {
-    getAudioContext();
+    // --- AUDIO & LIVE API REFERENCES ---
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const inputContextRef = useRef<AudioContext | null>(null); // Separate context for mic input
+    const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
+    const nextStartTimeRef = useRef<number>(0);
     
-    if (hudState === HUDState.THINKING || hudState === HUDState.SPEAKING) {
-        isProcessingRef.current = false;
-        if (audioContextRef.current) {
-            audioContextRef.current.close().then(() => {
-              audioContextRef.current = null;
-            });
-        }
-        setHudState(HUDState.IDLE);
-        
-        setTimeout(() => {
-             try { recognitionRef.current?.start(); } catch(e) {}
-        }, 100);
-        return;
-    }
+    // Live Client Logic
+    const liveClientRef = useRef<LiveSessionManager | null>(null);
+    const isLiveConnectedRef = useRef(false);
+    const inputProcessorRef = useRef<ScriptProcessorNode | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
 
-    if (hudState === HUDState.LISTENING) {
-      recognitionRef.current?.stop();
-    } else {
-      try {
-        recognitionRef.current?.start();
-      } catch (e) {
-        console.warn("Recognition already started");
-      }
-    }
-  };
-
-  // --- INTENT HANDLER ---
-  const executeIntents = (text: string) => {
-     const intentRegex = /\[\[(.*?):(.*?)\]\]/g;
-     let match;
-     while ((match = intentRegex.exec(text)) !== null) {
-        const command = match[1].toUpperCase();
-        const data = match[2];
-
-        console.log("EXECUTING INTENT:", command, data);
-
-        if (command === 'WHATSAPP') {
-           window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(data)}`, '_blank');
-        } else if (command === 'CALL') {
-           window.location.href = `tel:${data}`;
-        } else if (command === 'OPEN') {
-           const appMap: {[key:string]: string} = {
-              'YOUTUBE': 'https://www.youtube.com',
-              'INSTAGRAM': 'https://www.instagram.com',
-              'GOOGLE': 'https://www.google.com',
-              'CHROME': 'googlechrome://',
-              'SETTINGS': 'intent://settings/#Intent;scheme=android-app;end'
-           };
-           const url = appMap[data.toUpperCase()];
-           if (url) window.open(url, '_blank');
-        } else if (command === 'LOG_ADMIN_INQUIRY') {
-            if (user && user.role !== UserRole.ADMIN) {
-              const log = { userName: user.name, timestamp: Date.now() };
-              localStorage.setItem('nexa_admin_inquiry', JSON.stringify(log));
-            }
-        }
-     }
-  };
-
-  const speakSystemMessage = async (displayText: string, spokenTextOverride?: string) => {
-      if (!user) return;
-      
-      setHudState(HUDState.THINKING);
-      isProcessingRef.current = true;
-
-      const cleanDisplay = displayText.replace(/\[\[.*?\]\]/g, "");
-      const modelMessage: ChatMessage = { role: 'model', text: cleanDisplay, timestamp: Date.now() };
-
-      // Update UI for current session
-      setMessages(prevMessages => [...prevMessages, modelMessage]);
-
-      // Update master memory
-      const fullHistory = user.role === UserRole.ADMIN ? getAdminHistory() : getUserHistory(user.mobile);
-      const newFullHistory = [...fullHistory, modelMessage];
-      if (user.role === UserRole.ADMIN) {
-        saveAdminHistory(newFullHistory);
-      } else {
-        saveUserHistory(user.mobile, newFullHistory);
-      }
-      
-      const textToSpeak = spokenTextOverride || cleanDisplay;
-      const audioBuffer = await generateSpeech(textToSpeak);
-
-      if (!isProcessingRef.current) return;
-      
-      executeIntents(displayText);
-
-      if (audioBuffer) {
-        playAudio(audioBuffer);
-      } else {
-        setHudState(HUDState.IDLE);
-      }
-  };
-
-  const playAudio = (buffer: ArrayBuffer) => {
-      if (!isProcessingRef.current) return;
-
-      setHudState(HUDState.SPEAKING);
-      const ctx = getAudioContext();
-      const decodedBuffer = pcmToAudioBuffer(buffer, ctx);
-      const source = ctx.createBufferSource();
-      source.buffer = decodedBuffer;
-      source.connect(ctx.destination);
-      
-      source.onended = () => {
-        setHudState(HUDState.IDLE);
-        isProcessingRef.current = false;
-      };
-      
-      source.start();
-  };
-
-  const processQuery = async (text: string) => {
-    if (!user) return;
+    // Transcription Buffers for Live API
+    const currentInputTranscriptionRef = useRef('');
+    const currentOutputTranscriptionRef = useRef('');
     
-    setHudState(HUDState.THINKING);
-    isProcessingRef.current = true;
-    
-    const userMessage: ChatMessage = { role: 'user', text, timestamp: Date.now() };
-    setMessages(prevMessages => [...prevMessages, userMessage]);
+    const isMountedRef = useRef(true);
+    const isProcessingRef = useRef(false);
 
-    // Fetch full history for context, NOT from UI state
-    const fullHistory = user.role === UserRole.ADMIN ? getAdminHistory() : getUserHistory(user.mobile);
+    // Initial load check
+    useEffect(() => {
+        const storedUser = sessionStorage.getItem('nexa_user');
+        if (storedUser) {
+            handleLogin(JSON.parse(storedUser));
+        }
+    }, []);
 
-    try {
-        const rawAiResponse = await generateTextResponse(
-          text, 
-          user, 
-          fullHistory.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
+    // Setup Audio
+    useEffect(() => {
+        isMountedRef.current = true;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            setInstallPrompt(e);
+        });
+
+        // Initialize LiveClient wrapper
+        liveClientRef.current = new LiveSessionManager(
+            handleLiveMessage,
+            handleLiveClose,
+            handleLiveError
         );
 
-        if (!isProcessingRef.current) return;
+        return () => {
+            isMountedRef.current = false;
+            stopLiveSession();
+        };
+    }, []);
 
-        const cleanAiResponse = rawAiResponse.replace(/\[\[.*?\]\]/g, "").trim();
-        const modelMessage: ChatMessage = { role: 'model', text: cleanAiResponse, timestamp: Date.now() };
-        
-        setMessages(prevMessages => [...prevMessages, modelMessage]);
-        
-        const newFullHistory = [...fullHistory, userMessage, modelMessage];
-        if (user.role === UserRole.ADMIN) {
-          saveAdminHistory(newFullHistory);
-        } else {
-          saveUserHistory(user.mobile, newFullHistory);
+    const handleInstall = () => {
+        if (installPrompt) {
+            installPrompt.prompt();
+            installPrompt.userChoice.then(() => setInstallPrompt(null));
         }
+    };
 
-        executeIntents(rawAiResponse);
-
-        const audioBuffer = await generateSpeech(cleanAiResponse);
-
-        if (!isProcessingRef.current) return;
-        
-        if (audioBuffer) {
-          playAudio(audioBuffer);
-        } else {
-          setTimeout(() => setHudState(HUDState.IDLE), 1000);
-          isProcessingRef.current = false;
-        }
-    } catch (e) {
-        console.error("Process Query Error", e);
-        setHudState(HUDState.IDLE);
-        isProcessingRef.current = false;
-    }
-  };
-
-  const handleLogin = (profile: UserProfile) => {
-    setUser(profile);
-    localStorage.setItem('nexa_user', JSON.stringify(profile));
-
-    // ALWAYS start with a clean chat panel for a fresh session feel
-    setMessages([]);
-
-    // Log user for admin panel if they are a standard user
-    if (profile.role === UserRole.USER) {
-        const allUsersRaw = localStorage.getItem('nexa_all_users');
-        let allUsers = allUsersRaw ? JSON.parse(allUsersRaw) : [];
-        const userExists = allUsers.some((u: any) => u.mobile === profile.mobile);
-        if (!userExists) {
-          allUsers.push({ name: profile.name, mobile: profile.mobile, blocked: false });
-          localStorage.setItem('nexa_all_users', JSON.stringify(allUsers));
-        }
-    }
+    const getLocation = (): Promise<{latitude: number, longitude: number} | null> => {
+        return new Promise((resolve) => {
+            if (!navigator.geolocation) {
+                console.warn("Geolocation is not supported by this browser.");
+                resolve(null);
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    resolve({
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                    });
+                },
+                (error) => {
+                    console.warn("Geolocation permission denied or error:", error.message);
+                    resolve(null);
+                },
+                { timeout: 10000, maximumAge: 60000 }
+            );
+        });
+    };
     
-    // ALWAYS speak greeting on login
-    setTimeout(async () => {
-        // 1. Fetch weather
-        let weatherReport = "Pune ka mausam abhi saaf hai."; // Default fallback
-        try {
-          const weatherResponse = await generateTextResponse(
-            "Pune ka abhi ka mausam kaisa hai? Short me batao.",
-            profile,
-            [] // Pass empty history for a clean request
-          );
-          if (weatherResponse && !weatherResponse.toLowerCase().includes("interrupted")) {
-            weatherReport = weatherResponse;
-          }
-        } catch (e) {
-            console.error("Failed to fetch weather:", e);
+    // --- LIVE API HANDLERS ---
+
+    const handleLiveMessage = async (message: LiveServerMessage) => {
+        // 1. Handle Transcriptions
+        if (message.serverContent?.outputTranscription) {
+            const text = message.serverContent.outputTranscription.text;
+            currentOutputTranscriptionRef.current += text;
+        } else if (message.serverContent?.inputTranscription) {
+            const text = message.serverContent.inputTranscription.text;
+            currentInputTranscriptionRef.current += text;
         }
 
-        let introTemplate: string;
-        // 2. Select intro template based on role
-        if (profile.role === UserRole.ADMIN) {
-            const introIndexKey = 'nexa_admin_intro_index';
-            let currentIntroIndex = parseInt(localStorage.getItem(introIndexKey) || '0');
-            if (isNaN(currentIntroIndex)) currentIntroIndex = 0;
-            introTemplate = ADMIN_INTROS[currentIntroIndex % ADMIN_INTROS.length];
-            localStorage.setItem(introIndexKey, (currentIntroIndex + 1).toString());
-        } else {
-            const introIndexKey = 'nexa_user_intro_index';
-            let currentIntroIndex = parseInt(localStorage.getItem(introIndexKey) || '0');
-            if (isNaN(currentIntroIndex)) currentIntroIndex = 0;
-            introTemplate = USER_INTROS[currentIntroIndex % USER_INTROS.length];
-            localStorage.setItem(introIndexKey, (currentIntroIndex + 1).toString());
+        if (message.serverContent?.turnComplete) {
+            // Commit transcripts to chat history
+            const userText = currentInputTranscriptionRef.current.trim();
+            const modelText = currentOutputTranscriptionRef.current.trim();
+
+            if (userText && modelText) {
+                const newHistory = [
+                    ...chatHistory, 
+                    { role: 'user' as const, text: userText, timestamp: Date.now() },
+                    { role: 'model' as const, text: modelText, timestamp: Date.now() }
+                ];
+                setChatHistory(prev => [
+                    ...prev, 
+                    { role: 'user', text: userText, timestamp: Date.now() },
+                    { role: 'model', text: modelText, timestamp: Date.now() }
+                ]);
+
+                // Save to memory
+                if (userProfile?.role === UserRole.ADMIN) {
+                    saveAdminHistory([...memoryBankRef.current, ...newHistory]);
+                } else if (userProfile) {
+                    saveUserHistory(userProfile.mobile, [...memoryBankRef.current, ...newHistory]);
+                }
+            }
+
+            currentInputTranscriptionRef.current = '';
+            currentOutputTranscriptionRef.current = '';
         }
 
-        // 3. Construct final greeting
-        const displayText = introTemplate.replace("{pune_weather}", weatherReport);
-        const spokenText = displayText.replace(/Lohave/g, "लोहवे");
-
-        // 4. Speak
-        speakSystemMessage(displayText, spokenText);
-
-    }, 500);
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('nexa_user');
-    setMessages([]);
-    setHudState(HUDState.IDLE);
-  };
-
-  const handleInstall = () => {
-    if (installPrompt) {
-      installPrompt.prompt();
-      setInstallPrompt(null);
-    }
-  };
-
-  const handleClearMemory = () => {
-    if (user && user.role === UserRole.ADMIN) {
-      saveAdminHistory([]);
-      setMessages([]);
-    }
-    setPurgeModalOpen(false);
-  };
-
-  return (
-    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-black text-white font-sans selection:bg-nexa-cyan selection:text-black">
-      
-      <div className="perspective-grid"></div>
-      <div className="vignette"></div>
-      <div className="scanlines"></div>
-
-      {!user ? (
-        <Auth onLogin={handleLogin} />
-      ) : (
-        <>
-          <InstallBanner prompt={installPrompt} onInstall={handleInstall} />
-          
-          <StatusBar 
-            role={user.role} 
-            onLogout={handleLogout} 
-            onSettings={() => setAdminPanelOpen(!adminPanelOpen)} 
-          />
-
-          <div className="flex-1 relative flex flex-col items-center min-h-0 w-full">
+        // 2. Handle Audio Output (Speaking)
+        const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+        if (base64Audio) {
+            if (!audioContextRef.current) {
+                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
+            }
+            const ctx = audioContextRef.current;
             
-            <div className="flex-[0_0_auto] py-4 sm:py-6 w-full flex items-center justify-center z-10">
-               <HUD state={hudState} rotationSpeed={config.hudRotationSpeed} animationsEnabled={config.animationsEnabled} />
-            </div>
+            // Sync logic
+            nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
 
-            <div className="flex-1 w-full min-h-0 relative z-20 px-4 pb-4">
-               <ChatPanel 
-                 messages={messages} 
-                 isSpeaking={hudState === HUDState.SPEAKING} 
-                 userRole={user.role}
-                 userName={user.name}
-                 hudState={hudState}
-               />
-            </div>
+            const audioBytes = base64ToUint8Array(base64Audio);
+            const audioBuffer = await decodeAudioData(audioBytes, ctx);
+            
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(ctx.destination);
+            
+            source.start(nextStartTimeRef.current);
+            nextStartTimeRef.current += audioBuffer.duration;
+            
+            setIsSpeaking(true);
+            setHudState(HUDState.SPEAKING);
 
-          </div>
+            source.onended = () => {
+                // Approximate check if queue is empty (could be more robust)
+                if (ctx.currentTime >= nextStartTimeRef.current - 0.1) {
+                    setIsSpeaking(false);
+                    if (isLiveConnectedRef.current) {
+                        setHudState(HUDState.LISTENING);
+                    } else {
+                        setHudState(HUDState.IDLE);
+                    }
+                }
+            };
+        }
 
-          <ControlDeck onMicClick={handleMicClick} hudState={hudState} />
-          
-          <ConfirmationModal
-            isOpen={purgeModalOpen}
-            onClose={() => setPurgeModalOpen(false)}
-            onConfirm={handleClearMemory}
-            title="CONFIRM MEMORY PURGE"
-            promptText="This will delete your (Admin) entire conversation log. This action is irreversible. To proceed, type 'PURGE'."
-            confirmKeyword="PURGE"
-          />
+        // 3. Handle Interruption
+        if (message.serverContent?.interrupted) {
+             // Stop playback
+             if (audioContextRef.current) {
+                 audioContextRef.current.suspend().then(() => audioContextRef.current?.resume());
+                 nextStartTimeRef.current = 0;
+             }
+             setIsSpeaking(false);
+             currentOutputTranscriptionRef.current = ''; // Clear stale transcription
+             setHudState(HUDState.LISTENING);
+        }
+    };
 
-          <ManageAccountsModal
-            isOpen={accountsModalOpen}
-            onClose={() => setAccountsModalOpen(false)}
-          />
+    const handleLiveClose = () => {
+        isLiveConnectedRef.current = false;
+        setHudState(HUDState.IDLE);
+        playReactorDeactiveSound();
+    };
 
-          {user.role === UserRole.ADMIN && (
-            <AdminPanel 
-              isOpen={adminPanelOpen} 
-              onClose={() => setAdminPanelOpen(false)} 
-              config={config}
-              onConfigChange={setConfig}
-              onPurgeMemory={() => setPurgeModalOpen(true)}
-              onManageAccounts={() => setAccountsModalOpen(true)}
+    const handleLiveError = (err: any) => {
+        console.error("Live Error", err);
+        setHudState(HUDState.IDLE);
+        isLiveConnectedRef.current = false;
+        playSecurityAlertSound();
+    };
+
+    const startLiveSession = async () => {
+        if (!userProfile || !liveClientRef.current) return;
+
+        try {
+            playReactorActiveSound();
+            setHudState(HUDState.THINKING); // Brief transition
+            
+            // 1. Establish Gemini Connection
+            await liveClientRef.current.connect(userProfile, location);
+            isLiveConnectedRef.current = true;
+            setHudState(HUDState.LISTENING);
+
+            // 2. Setup Input Audio Stream (Mic -> Processor -> Gemini)
+            if (!inputContextRef.current) {
+                inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            }
+            const ctx = inputContextRef.current;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 16000
+            }});
+            mediaStreamRef.current = stream;
+
+            const source = ctx.createMediaStreamSource(stream);
+            // 4096 buffer size for reasonable latency/performance balance
+            const processor = ctx.createScriptProcessor(4096, 1, 1);
+            inputProcessorRef.current = processor;
+
+            processor.onaudioprocess = (e) => {
+                if (!isLiveConnectedRef.current) return;
+
+                const inputData = e.inputBuffer.getChannelData(0);
+                // Downsample/Convert Float32 to Int16
+                const int16Data = float32ToInt16(inputData);
+                const base64Data = arrayBufferToBase64(int16Data.buffer);
+
+                // Send chunk
+                liveClientRef.current?.sendAudioChunk(base64Data);
+            };
+
+            source.connect(processor);
+            processor.connect(ctx.destination);
+
+        } catch (error) {
+            console.error("Failed to start Live Session", error);
+            setHudState(HUDState.IDLE);
+            speakText("Unable to establish neural link.");
+        }
+    };
+
+    const stopLiveSession = () => {
+        if (liveClientRef.current) {
+            liveClientRef.current.disconnect();
+        }
+        
+        // Stop Mic Tracks
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
+        }
+
+        // Disconnect processor
+        if (inputProcessorRef.current) {
+            inputProcessorRef.current.disconnect();
+            inputProcessorRef.current = null;
+        }
+        
+        isLiveConnectedRef.current = false;
+        setHudState(HUDState.IDLE);
+    };
+
+
+    const handleMicClick = () => {
+        if (isLiveConnectedRef.current) {
+            stopLiveSession();
+        } else {
+            startLiveSession();
+        }
+    };
+
+    // --- LEGACY/TEXT LOGIN HANDLER ---
+
+    const handleLogin = async (user: UserProfile) => {
+        if (isProcessingRef.current) return;
+        isProcessingRef.current = true;
+
+        try {
+            setIsRequestPending(true);
+            setHudState(HUDState.THINKING);
+            setUserProfile(user);
+            sessionStorage.setItem('nexa_user', JSON.stringify(user));
+    
+            const storedHistory = user.role === UserRole.ADMIN
+                ? getAdminHistory()
+                : getUserHistory(user.mobile);
+            
+            memoryBankRef.current = storedHistory;
+            setChatHistory([]); // Clear visual chat on reload
+    
+            if (user.role === UserRole.USER && storedHistory.length === 0) {
+                const allUsersRaw = localStorage.getItem('nexa_all_users');
+                let allUsers: StoredUser[] = allUsersRaw ? JSON.parse(allUsersRaw) : [];
+                if (!allUsers.find(u => u.mobile === user.mobile)) {
+                    allUsers.push({ name: user.name, mobile: user.mobile, blocked: false });
+                    localStorage.setItem('nexa_all_users', JSON.stringify(allUsers));
+                }
+            }
+            
+            const userLocation = await getLocation();
+            if (isMountedRef.current) {
+                setLocation(userLocation);
+            }
+    
+            const greetingPrompt = storedHistory.length > 0 ? "[RETURNING_GREETING]" : "[INITIAL_GREETING]";
+
+            const greetingText = await generateTextResponse(
+                greetingPrompt,
+                user,
+                [], 
+                userLocation
+            );
+    
+            // PRE-FETCH AUDIO (Legacy TTS)
+            let audioBuffer = null;
+            if (greetingText) {
+                audioBuffer = await generateSpeech(greetingText);
+            }
+
+            if (greetingText && isMountedRef.current) {
+                setIsSpeaking(true);
+                setHudState(HUDState.SPEAKING);
+
+                const greetingMessage: ChatMessage = { role: 'model', text: greetingText, timestamp: Date.now() };
+                setChatHistory([greetingMessage]);
+                
+                if (audioBuffer) {
+                    playAudio(audioBuffer);
+                } else {
+                    setTimeout(() => {
+                         setIsSpeaking(false);
+                         setHudState(HUDState.IDLE);
+                    }, 3000);
+                }
+
+                // Save to history
+                const fullHistory = [...memoryBankRef.current, greetingMessage];
+                if (user.role === UserRole.ADMIN) {
+                    saveAdminHistory(fullHistory);
+                } else {
+                    saveUserHistory(user.mobile, fullHistory);
+                }
+            } else if (isMountedRef.current) {
+                const fallbackGreeting = "Systems online.";
+                const fallbackMessage: ChatMessage = { role: 'model', text: fallbackGreeting, timestamp: Date.now() };
+                setChatHistory([fallbackMessage]);
+                setIsSpeaking(false);
+                setHudState(HUDState.IDLE);
+            }
+            
+            if(isMountedRef.current) {
+                 setIsRequestPending(false);
+            }
+
+        } catch (error) {
+            console.error("Login process failed:", error);
+            if (isMountedRef.current) {
+                setHudState(HUDState.IDLE);
+                setIsRequestPending(false);
+                isProcessingRef.current = false;
+            }
+        }
+    };
+
+    const handleLogout = () => {
+        stopLiveSession();
+        if (audioQueueRef.current.length > 0) {
+            audioQueueRef.current.forEach(source => source.stop());
+            audioQueueRef.current = [];
+        }
+        setIsSpeaking(false);
+        setUserProfile(null);
+        setChatHistory([]);
+        memoryBankRef.current = [];
+        setHudState(HUDState.IDLE);
+        sessionStorage.removeItem('nexa_user');
+    };
+
+    const handlePurgeMemory = () => {
+        setIsPurgeModalOpen(false);
+        localStorage.removeItem('nexa_all_users');
+        localStorage.removeItem('nexa_memory_user_logs');
+        localStorage.removeItem('nexa_memory_admin_log');
+        if (userProfile?.role === UserRole.ADMIN) {
+            setChatHistory([]);
+            memoryBankRef.current = [];
+            saveAdminHistory([]);
+        }
+        alert('All user data and memory logs have been purged.');
+    };
+
+    const playAudio = async (buffer: ArrayBuffer) => {
+        if (!audioContextRef.current) {
+             audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
+        }
+        const ctx = audioContextRef.current;
+
+        if (ctx.state === 'suspended') {
+            await ctx.resume();
+        }
+        
+        try {
+            // Manual decoding of raw PCM data
+            // Create Uint8Array view of the ArrayBuffer for the helper
+            const uint8Data = new Uint8Array(buffer);
+            const decoded = await decodeAudioData(uint8Data, ctx, 24000);
+
+            const source = ctx.createBufferSource();
+            source.buffer = decoded;
+            source.connect(ctx.destination);
+            source.onended = () => {
+               if (!isMountedRef.current) return;
+               setIsSpeaking(false);
+               setHudState(HUDState.IDLE);
+               setIsRequestPending(false);
+               isProcessingRef.current = false;
+            };
+            source.start();
+        } catch (e) {
+            console.error("Audio playback error:", e);
+            // Fallback or cleanup
+            setIsSpeaking(false);
+            setHudState(HUDState.IDLE);
+            setIsRequestPending(false);
+            isProcessingRef.current = false;
+        }
+    };
+
+    // Legacy speakText (for System Alerts)
+    const speakText = async (text: string) => {
+        if (isLiveConnectedRef.current) stopLiveSession(); // Priority override
+        setHudState(HUDState.IDLE);
+
+        if (!text) return;
+
+        if (Object.values(ERROR_MESSAGES).includes(text)) {
+             if (isMountedRef.current) {
+                 playSecurityAlertSound();
+                 setIsSpeaking(false);
+                 setHudState(HUDState.IDLE);
+             }
+             return;
+        }
+
+        const audioBuffer = await generateSpeech(text);
+        if (audioBuffer && isMountedRef.current) {
+            setIsSpeaking(true);
+            setHudState(HUDState.SPEAKING);
+            playAudio(audioBuffer);
+        }
+    };
+
+    if (!userProfile) {
+        return <Auth onLogin={handleLogin} />;
+    }
+
+    return (
+        <div className="h-[100dvh] w-screen bg-black font-sans flex flex-col items-center overflow-hidden relative">
+            <div className="perspective-grid"></div>
+            <div className="vignette"></div>
+            <div className="scanlines"></div>
+
+            <ConfirmationModal
+                isOpen={isPurgeModalOpen}
+                onClose={() => setIsPurgeModalOpen(false)}
+                onConfirm={handlePurgeMemory}
+                title="!!! MEMORY PURGE WARNING !!!"
+                promptText="This is an irreversible action. ALL user accounts will be permanently deleted."
+                confirmKeyword="PURGE"
             />
-          )}
-        </>
-      )}
-    </div>
-  );
+            {userProfile.role === UserRole.ADMIN && (
+                <>
+                    <AdminPanel
+                        isOpen={isAdminPanelOpen}
+                        onClose={() => setIsAdminPanelOpen(false)}
+                        config={config}
+                        onConfigChange={setConfig}
+                        onPurgeMemory={() => setIsPurgeModalOpen(true)}
+                        onManageAccounts={() => { setIsAdminPanelOpen(false); setIsAccountsModalOpen(true); }}
+                    />
+                    <ManageAccountsModal isOpen={isAccountsModalOpen} onClose={() => setIsAccountsModalOpen(false)} />
+                </>
+            )}
+
+            <InstallBanner prompt={installPrompt} onInstall={handleInstall} />
+
+            <div className={`w-full h-full flex flex-col items-center transition-all duration-500 ${installPrompt ? 'pt-16' : ''}`}>
+                <StatusBar
+                    onLogout={handleLogout}
+                    onSettings={() => setIsAdminPanelOpen(!isAdminPanelOpen)}
+                    isAdmin={userProfile.role === UserRole.ADMIN}
+                />
+
+                <main className="flex-1 flex flex-col w-full relative px-4 pb-4 pt-2 overflow-hidden">
+                    <div className="h-[32%] min-h-[220px] w-full shrink-0 flex items-center justify-center relative z-20">
+                        <HUD 
+                            state={hudState} 
+                            rotationSpeed={config.hudRotationSpeed}
+                            animationsEnabled={config.animationsEnabled}
+                        />
+                    </div>
+                    
+                    <div className="flex-1 w-full relative z-20 min-h-0 flex flex-col pb-4">
+                        <ChatPanel
+                            messages={chatHistory}
+                            isSpeaking={isSpeaking}
+                            userRole={userProfile.role}
+                            userName={userProfile.name}
+                            hudState={hudState}
+                        />
+                    </div>
+                </main>
+
+                <ControlDeck onMicClick={handleMicClick} hudState={hudState} config={config} />
+            </div>
+        </div>
+    );
 };
 
 export default App;

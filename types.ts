@@ -27,6 +27,8 @@ export interface AppConfig {
   introText: string;
   animationsEnabled: boolean;
   hudRotationSpeed: number;
+  micRotationEnabled: boolean;
+  micRotationSpeed: number;
 }
 
 export interface StoredUser {
